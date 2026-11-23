@@ -118,10 +118,10 @@
 \setlist[itemize]{itemsep=2pt, topsep=4pt, parsep=0pt}
 \setlist[enumerate]{itemsep=2pt, topsep=4pt, parsep=0pt}
 
-% --- 章节标题格式（学术论文风格）---
+% --- 章节标题格式（学术论文风格，纯黑字体）---
 \ctexset{
   section = {
-    format = \Large\sffamily\bfseries\color{PrimaryNavy},
+    format = \Large\sffamily\bfseries,
     name = {,},
     number = \arabic{section},
     aftername = \hspace{0.6em},
@@ -129,23 +129,23 @@
     afterskip = 8pt plus 2pt minus 1pt,
   },
   subsection = {
-    format = \large\sffamily\bfseries\color{PrimaryNavy},
+    format = \large\sffamily\bfseries,
     aftername = \hspace{0.5em},
     beforeskip = 12pt plus 3pt minus 2pt,
     afterskip = 5pt plus 1pt minus 1pt,
   },
   subsubsection = {
-    format = \normalsize\sffamily\bfseries\color{black},
+    format = \normalsize\sffamily\bfseries,
     aftername = \hspace{0.5em},
     beforeskip = 8pt plus 2pt minus 1pt,
     afterskip = 4pt plus 1pt minus 1pt,
   }
 }
 
-% --- 图表标题格式 ---
+% --- 图表标题格式（纯黑字体）---
 \captionsetup{
   font={small},
-  labelfont={bf, sf, color=PrimaryNavy},
+  labelfont={bf, sf},
   labelsep=quad,
   skip=6pt
 }
@@ -173,13 +173,13 @@
 % 默认正文样式为无页眉
 \pagestyle{mainbody}
 
-% --- 待协作章节占位框（供双人讨论后续第 4-7 章内容使用）---
+% --- 待协作章节占位框（供双人讨论后续第 4-7 章内容使用，纯黑文字配浅灰边框）---
 \newtcolorbox{planbox}[1]{
   enhanced,
   breakable,
-  colback=TodoBg,
-  colframe=AccentBlue!55!gray,
-  coltitle=PrimaryNavy,
+  colback=black!2,
+  colframe=black!40,
+  coltitle=black,
   fonttitle=\sffamily\bfseries\small,
   title={待协作撰写提纲：#1},
   boxrule=0.6pt,
@@ -189,15 +189,15 @@
   top=6pt,
   bottom=6pt,
   attach boxed title to top left={xshift=8pt, yshift=-2mm},
-  boxed title style={colback=white, colframe=AccentBlue!55!gray, boxrule=0.5pt, arc=2pt}
+  boxed title style={colback=white, colframe=black!40, boxrule=0.5pt, arc=2pt}
 }
 
-% --- 论文标题与双人居中署名区（严格按 P3 格式，仅 2 人）---
+% --- 论文标题与双人居中署名区（严格按 P3 格式，仅 2 人，纯黑字体）---
 \newcommand{\MakePaperTitle}[5]{%
   \thispagestyle{firstpage}%
   \begin{center}
     \vspace*{2pt}
-    {\zihao{2}\sffamily\bfseries\color{PrimaryNavy} #1 \par}
+    {\zihao{2}\sffamily\bfseries #1 \par}
     \vspace{10pt}
     {\zihao{4}
       学号：#2，姓名：#3 \\[4pt]
