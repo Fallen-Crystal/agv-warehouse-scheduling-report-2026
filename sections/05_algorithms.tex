@@ -1,0 +1,20 @@
+% ============================================================================
+% 第 5 章 核心调度与路径规划算法设计（待与队友商议合写）
+% ============================================================================
+\section{核心调度与路径规划算法设计}
+\label{sec:algorithms}
+
+\begin{planbox}{第 5 章写作规划（供双人分工确认）}
+  本章重点剖析系统最终采用的核心算法机理（建议配以规范伪代码、流程图与时间复杂度分析，避免整段粘贴源码）：
+  \begin{enumerate}
+    \item \textbf{5.1 基于增量时空预约表的 SIPP 路径规划}：阐述如何将栅格上的动态障碍占位压缩为最大安全时间区间，支持单车“就位—取货连续占位—送货—离站—返库”组合路径拼接，以及增量预约表对搜索效率的加速作用~\cite{phillips2011sipp}。
+    \item \textbf{5.2 面向真实订单流的事件门控软分区联合 GA（\code{gate}）}：
+    \begin{itemize}
+      \item 阐述事件门控触发条件与低负载位掩码动态规划分支；
+      \item 详述软分区联合染色体编码、交叉/变异算子与多候选种群管理~\cite{vidal2022hgs}；
+      \item 说明“快速代理评估 + Top-$K$ 候选真实预约表 SIPP 物理预演”的两级评分机制，以及 \code{gate\_preview3} 轻量档的预算权衡原理。
+    \end{itemize}
+    \item \textbf{5.3 通用引擎核心机制（LNS 联合修复与 BCRD 影子试派）}：介绍主线 A 中的拥堵关联车队邻域选择与 LNS 后缀重排（\code{sipp\_budget} / \code{sipp\_batch}）~\cite{li2021mapflns}，以及高积压工况下独立影子环境前瞻试派（\code{bcrd\_budget} / \code{sipp\_stream\_bcrd}）的算法流程。
+    \item \textbf{5.4 工程架构与独立物理验解设计}：概述零第三方依赖标准库实现、原子提交审计、独立物理验解模块（\code{validation.py} / \code{verify.py}）以及本地 Web 交互式仿真可视化界面（\code{agv serve}）。
+  \end{enumerate}
+\end{planbox}

@@ -1,0 +1,131 @@
+% ============================================================================
+% 第 3 章 思路推进与方案演化
+% ============================================================================
+\section{思路推进与方案演化}
+\label{sec:evolution}
+
+本项目的算法设计并非一次性套用现成模板，而是遵循\textbf{“构建基线 $\rightarrow$ 诊断瓶颈 $\rightarrow$ 提出改进 $\rightarrow$ 配对消融 $\rightarrow$ 跨窗口复评 $\rightarrow$ 架构收敛”}的实证迭代路径逐步推进。本章系统梳理两条研究主线的演化脉络，重点阐明每一阶段引入新机制的动因，以及若干探索性分支在严格跨窗口检验中被保留或舍弃的依据。
+
+\subsection{总体演化路线总览}
+
+图~\ref{fig:evolution-roadmap} 展示了两条主线的阶段演进关系。总体来看，项目前期通过主线 A 完成仓储物理建模的逐层细化（Legacy $\rightarrow$ V4 分层货架 $\rightarrow$ V9/V9.1 混合货架）与底层路径规划引擎的提速升级（时空 A* $\rightarrow$ SIPP $\rightarrow$ LNS/BCRD）；随后将经过验证的 SIPP 无碰撞执行内核引入主线 B，接入真实工业订单流 WEPAStacks，在统一线性目标口径下依次探索贪心规则、精确指派、群智能与遗传搜索、门控机制、自适应算子及深度强化学习调度切换，最终经由跨窗口多随机种子稳健性实验完成方案定型。
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+    node distance=0.45cm and 0.48cm,
+    stageA/.style={
+      rectangle, rounded corners=3pt, draw=AccentBlue, fill=SoftBlueBg,
+      align=center, font=\footnotesize, inner sep=4.5pt, minimum width=2.45cm, minimum height=1.05cm
+    },
+    stageB/.style={
+      rectangle, rounded corners=3pt, draw=AccentTeal, fill=SoftTealBg,
+      align=center, font=\footnotesize, inner sep=4.5pt, minimum width=2.45cm, minimum height=1.05cm
+    },
+    finalB/.style={
+      rectangle, rounded corners=3pt, draw=WarmAmber, fill=SoftAmberBg, very thick,
+      align=center, font=\footnotesize\bfseries, inner sep=4.5pt, minimum width=2.55cm, minimum height=1.05cm
+    },
+    explore/.style={
+      rectangle, rounded corners=3pt, draw=BorderGray, dashed, fill=white,
+      align=center, font=\scriptsize, inner sep=4pt, minimum width=2.35cm, minimum height=0.85cm
+    },
+    arr/.style={-{Stealth[length=2mm]}, thick, color=PrimaryNavy},
+    darr/.style={-{Stealth[length=1.8mm]}, dashed, color=MutedText}
+  ]
+    % 主线 A 标识
+    \node[font=\small\sffamily\bfseries\color{AccentBlue}, anchor=west] (labA) at (0, 2.55) {主线 A：自研通用调度引擎演进（\code{src/agv/}）};
+
+    \node[stageA] (a1) at (1.35, 1.55) {\bfseries Stage A1\\[-1pt] \code{baseline}\\ \scriptsize 贪心 + 时空 A*};
+    \node[stageA, right=of a1] (a2) {\bfseries Stage A2\\[-1pt] \code{sipp\_budget/batch}\\ \scriptsize SIPP + LNS/批滚动};
+    \node[stageA, right=of a2] (a3) {\bfseries Stage A3 (V4)\\[-1pt] \code{bcrd\_budget}\\ \scriptsize 分层货架 + 影子试派};
+    \node[stageA, right=of a3] (a4) {\bfseries Stage A4 (V9/V9.1)\\[-1pt] \code{sipp\_stream\_bcrd}\\ \scriptsize 混合货架 + 流式关闭};
+
+    \draw[arr] (a1) -- (a2);
+    \draw[arr] (a2) -- (a3);
+    \draw[arr] (a3) -- (a4);
+
+    % 主线 B 标识（右移留出左侧连线通道，避免与箭线重叠）
+    \node[font=\small\sffamily\bfseries\color{AccentTeal}, anchor=west] (labB) at (2.85, -0.35) {主线 B：WEPA 真实订单流算法收敛（\code{research/recommended-20261024/}）};
+
+    \node[stageB] (b1) at (1.35, -1.35) {\bfseries Stage B1\\[-1pt] 真实流接入\\ \scriptsize 线性目标 + \code{fcfs/eta}};
+    \node[stageB, right=of b1] (b2) {\bfseries Stage B2\\[-1pt] \code{simple} $\rightarrow$ \code{wide}\\ \scriptsize 软分区联合 GA};
+    \node[finalB, right=of b2] (b3) {\bfseries Stage B3（最终）\\[-1pt] \code{gate}\\ \scriptsize 事件门控 + SIPP 预演};
+    \node[stageB, right=of b3] (b4) {\bfseries Stage B4\\[-1pt] 跨窗口多 Seed 复评\\ \scriptsize 561 运行独立验解};
+
+    \draw[arr] (b1) -- (b2);
+    \draw[arr] (b2) -- (b3);
+    \draw[arr] (b3) -- (b4);
+
+    % SIPP 内核迁移连线（位于空白通道内，无文字重叠）
+    \draw[darr, color=AccentTeal] (a2.south) -- ++(0, -0.42) -| node[pos=0.22, above, font=\scriptsize, color=AccentTeal]{SIPP 预约内核复用} (b1.north);
+
+    % 探索分支对照
+    \node[explore, below=0.55cm of b2] (e1) {\code{hungarian} / \code{hga}\\ \tiny 匈牙利匹配与混合初始化};
+    \node[explore, below=0.55cm of b3] (e2) {\code{wide\_adapt} / 预算扫描\\ \tiny 自适应算子与 \code{preview3/gen24}};
+    \node[explore, below=0.55cm of b4] (e3) {历史探索分支\\ \tiny 耦合修复 / \code{Double DQN}};
+
+    \draw[darr] (b2.south) -- (e1.north);
+    \draw[darr] (b3.south) -- (e2.north);
+    \draw[darr] (b4.south) -- (e3.north);
+  \end{tikzpicture}
+  \caption{双主线问题驱动演化路线与探索性对照分支图}
+  \label{fig:evolution-roadmap}
+\end{figure}
+
+\subsection{主线 A 演进：从基础启发式到分层动态与混合货架引擎}
+
+主线 A 的演进以“先打通可验证基线，再逐级消除路径瓶颈、分配近视与场景失真”为核心逻辑，历经四个关键阶段：
+
+\begin{enumerate}
+  \item \textbf{阶段 A1（基线构建与瓶颈暴露）}：初始版本 \code{baseline} 采用距离贪心派单与标准时空扩展 A* 路径规划。随着任务密度和车辆数增加，时空 A* 逐时间步展开 $(x, y, t)$ 状态空间的开销迅速膨胀，且先到先占的顺序规划导致后规划车辆频繁在窄巷道内被动绕行或长时等待。
+  \item \textbf{阶段 A2（SIPP 安全区间加速与局部协同）}：为压缩搜索空间，规划层升级为安全区间路径规划（SIPP）~\cite{phillips2011sipp}，将同一栅格连续无冲突的时间窗口合并为安全区间状态，并配套增量索引式时空预约表以降低冲突查询开销。在此基础上，针对局部拥堵引入大邻域搜索联合后缀重排（\code{joint\_only} / \code{sipp\_budget}），通过对高冲突车辆子集重新定序规划消除阻塞；针对静态并发场景进一步提出首轮多车有序批次滚动策略（\code{sipp\_batch}），在 Legacy 静态基准上将平均流程时间 $R$ 相对基线降低 2.62\%、总行驶步数减少 4.24\%，且运行速度明显优于同等质量的时空 A* 联合批规划（10.27\,s 对比 14.15\,s）。
+  \item \textbf{阶段 A3（V4 分层单面货架与 BCRD 影子试派）}：为更贴合立体仓库物理工艺，V4 建模引入任务货架层高 \code{shelf\_level}、与层高成正比的装货耗时（$2\times\text{shelf\_level}$ 步）、交付站卸货即离以及同面货架层序解锁约束。在动态高积压工况下，单步即时指派容易因忽视后续待派任务而诱发货架面排队阻塞。为此提出\textbf{影子试派批次优化（BCRD，\code{bcrd\_budget}）}：当可见积压超过阈值时，在独立轻量影子环境中对多个候选有序批次序列开展前瞻滚动试派，择优提交当前首步指派。在 V4 分层动态 5-seed 实验中，\code{bcrd\_budget} 相对 \code{baseline} 将综合指标 $F$ 改善 3.01\%（4 胜 1 平 0 负），且平均单次求解耗时仅 0.17\,s。
+  \item \textbf{阶段 A4（V9/V9.1 混合背靠背货架与流式关闭机制）}：进一步拓展至包含单排单层（双侧可取货）与背靠背多层货架的混合布局，显式支持取货侧选择、流式订单显式关闭事件（\code{close}）以及波次间隙的安全通道待命定位。在 V9.1 静态并发场景下，流式匹配与影子试派结合方案（\code{sipp\_stream\_bcrd}）将综合指标 $F$ 改善 1.53\%，且超参扫描表明批次上限 \code{max\_batches} 取 2 即可获得完整收益。
+\end{enumerate}
+
+\subsection{主线 B 演进：面向 WEPA 真实订单流的算法收敛}
+
+为检验调度算法在大规模、非平稳真实工业订单流中的实战能力，主线 B 引入公开的 SLAPStack/WEPAStacks 真实入出库请求数据~\cite{pfrommer2022slapstack}，映射至 $62\times 47$ 大型仓库网格（6 辆 AGV、5 层货架、900\,s 滑动订单窗口），并围绕核心决策算法开展了四轮递进式演进与严格筛选：
+
+\begin{enumerate}
+  \item \textbf{评价重构与规则基线建立}：早期探索阶段（10 月 22 日）在合成数据上尝试了多类启发式与蚁群（ACO）、粒子群（PSO）路径混合，发现路径层引入元启发式对离散网格避碰收益有限，而真正的优化空间位于“订单分配与执行次序的联合决策”。接入真实入出库流后，首先重构了去基线依赖的固定尺度线性目标函数（式~\eqref{eq:obj-wepa-overview}），避免因参照基线波动导致跨轮评价失真；同时建立先到先服务（\code{fcfs}）、最早到达优先（\code{eta}）与滚动匈牙利指派（\code{hungarian}）~\cite{kuhn1955hungarian} 三类规则与局部匹配基线。
+  \item \textbf{从单轮贪心到软分区联合 GA（\code{simple} $\rightarrow$ \code{wide}）}：规则基线与一次性匈牙利匹配仅优化当前瞬时批次，难以协调多辆 AGV 连续多单的任务均衡与交付站错峰。为此引入软分区联合遗传算法，将未完成订单的车辆归属与执行次序联合编码，并由轻量模型评估与预约表 SIPP 物理预演联合打分。从初期受限预算版 \code{simple} 扩展种群与迭代预算至 \code{wide} 后，调度质量获得显著提升，但也暴露出在低负载窗口高频触发 GA 带来的计算冗余问题。
+  \item \textbf{事件门控与最终方案定型（\code{gate}）}：针对 \code{wide} 的算力冗余，在 \code{gate} 中引入\textbf{事件门控滚动派单}机制：当在途与就绪任务数处于低负载区间时，跳过遗传迭代，直接调用位掩码动态规划或低开销精确分支完成分配；仅当多车多单存在显著竞争时才触发软分区联合 GA，并对顶级候选执行真实预约表 SIPP 物理预演择优。多随机种子对照表明，\code{gate} 与 \code{wide} 在综合目标 $F$ 上高度接近（开发窗 +0.11\%，验证窗 $-0.10\%$），同时将开发窗的 GA 触发次数由 560 次降至 205 次（削减 63\%），且在 4 个既有验证窗口上相对 \code{fcfs}、\code{eta}、\code{hungarian} 分别取得 +5.45\%、+2.43\% 与 +3.87\% 的全胜改善（4/0/0）。此外，预算扫描进一步确认：将完整 SIPP 预演数降至 3 次（\code{gate\_preview3}）可在 $F$ 仅波动 $-0.33\%$ 的代价下削减约 44\% 的 CPU 耗时，形成面向算力受限场景的实用轻量档。
+  \item \textbf{探索性分支的跨窗口稳健性复盘}：在选型收敛过程中，项目秉持“开发集探索、独立验证集冻结复评”的科研规范，系统检验了多项进阶改进设想：
+  \begin{itemize}
+    \item \emph{匈牙利混合初始化（\code{hga}）与自适应交叉/变异（\code{wide\_adaptXY}）}：在开发窗上，\code{hga} 相对 \code{gate} 取得 +0.95\% 改善，仅开启交叉自适应的 \code{wide\_adapt01} 相对固定参数版取得 +0.94\% 改善；然而在 4 个独立既有验证窗口复评中，两者均出现跨窗回退（\code{hga} 为 $-1.12\%$、0/0/4；\code{wide\_adapt01} 为 $-0.54\%$、1/0/3），说明局部开发窗上的单点增益存在过拟合风险。
+    \item \emph{扩大迭代代数与事后局部修复}：将 GA 代数由 16 增至 24（\code{gate\_gen24}）在验证窗反而下降 1.41\%（0/0/4），表明在动态滚动环境中过度加深单步静态搜索会加剧对当前不完全信息的过拟合；开放流终点预测、瓶颈邻域修复（ALNS 思路）~\cite{ropke2006alns} 与双车耦合局部重排在开发/验证集间亦存在权衡不一致，故保留为对照算子而非默认主线。
+    \item \emph{深度强化学习切换探索（\code{Double DQN}）}：在独立归档分支 \code{dqn-experiment-v2} 中探索了以 Double DQN~\cite{vanhasselt2016ddqn} 动态选择局部匹配与自适应 GA 动作的元调度框架；测试结果显示其整体综合目标略低于纯自适应 GA 基线（$-0.37\%$），且引入额外训练依赖，因此予以完整归档供对比反思，未纳入零依赖默认主线。
+  \end{itemize}
+\end{enumerate}
+
+\subsection{关键演进阶段与算法对照汇总}
+
+为直观呈现上述思路推进脉络，表~\ref{tab:evolution-summary} 汇总了两条主线从初始基线到最终方案的关键演进节点、所要解决的核心痛点及验证定位。
+
+\begin{table}[htbp]
+  \centering
+  \caption{核心算法演进历程、解决痛点与最终定位对照表}
+  \label{tab:evolution-summary}
+  \footnotesize
+  \renewcommand{\arraystretch}{1.24}
+  \begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{2.75cm} c >{\raggedright\arraybackslash}p{2.85cm} >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}p{2.45cm}}
+    \toprule
+    \sffamily\bfseries 方案标识 & \sffamily\bfseries 主线 & \sffamily\bfseries 针对的核心痛点 & \sffamily\bfseries 关键技术突破 & \sffamily\bfseries 验证定位 \\
+    \midrule
+    \code{baseline} & A & 缺乏可复现对照参照 & 距离贪心派单 + 时空扩展 A* 路径规划 & 通用基线 \\
+    \code{sipp\_budget} / \code{sipp\_batch} & A & 时空 A* 慢、局部巷道拥堵与静态首轮失衡 & SIPP 安全区间压缩 + 增量预约表 + 拥堵关联 LNS 与首轮批滚动 & Legacy 静态优选（$R$ 降 2.62\%） \\
+    \code{bcrd\_budget} & A & V4 分层货架高积压下即时派单近视 & 轻量影子环境前瞻试派多候选有序批次序列 & V4 动态优选（$F$ 降 3.01\%） \\
+    \code{sipp\_stream\_bcrd} & A & V9.1 混合背靠背货架与显式流关闭协同 & 显式取货侧选择 + 安全待命 + BCRD（\code{max\_batches=2}） & V9.1 静态优选（$F$ 降 1.53\%） \\
+    \midrule
+    \code{fcfs} / \code{eta} / \code{hungarian} & B & 真实订单流下缺少规则与一次性匹配参照 & 按到达、预计耗时或当前代价矩阵即时指派 & 规则与匹配基线 \\
+    \code{simple} $\rightarrow$ \code{wide} & B & 单批次匹配忽视多单连续协同与错峰 & 软分区联合 GA 编码多车任务序列并扩大搜索预算 & GA 演进过渡版 \\
+    \textbf{\code{gate}} & \textbf{B} & \code{wide} 在低负载频繁触发 GA 致算力冗余 & \textbf{事件门控低负载精确分支 + 软分区联合 GA + SIPP 物理预演} & \textbf{最终默认推荐}（验证窗全胜基线） \\
+    \code{gate\_preview3} & B & 离线/边缘算力受限下的耗时压缩需求 & 完整 SIPP 预演数由默认降至 3 次，CPU 降约 44\% & 算力受限轻量档 \\
+    \code{hga} / \code{wide\_adapt} / \code{DQN} & B & 探索初始化加速、自适应算子与 RL 元调度 & 匈牙利初始个体、自适应交叉/变异率、Double DQN 动作切换 & 探索对照与归档（跨窗未优于 \code{gate}） \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+通过上述两主线交织、正负对照并重的演化过程，本项目不仅确立了综合表现最稳健的默认方案 \code{gate} 及通用引擎 \code{src/agv/}，也为后续章节展开严格的数学建模、算法伪代码设计与全量多维实验分析构建了清晰的逻辑主干。

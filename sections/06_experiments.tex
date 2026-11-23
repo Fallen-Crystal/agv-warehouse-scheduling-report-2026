@@ -1,0 +1,20 @@
+% ============================================================================
+% 第 6 章 实验设计与结果分析（待与队友商议合写）
+% ============================================================================
+\section{实验设计与结果分析}
+\label{sec:experiments}
+
+\begin{planbox}{第 6 章写作规划（供双人分工确认）}
+  本章将全面呈现 561 次独立验解运行的定量结果与可视化图表（原始数据与高清图片均已冻结归档于代码仓库 \code{results/} 目录，后续可直接转入本仓库 \code{figures/} 引用）：
+  \begin{enumerate}
+    \item \textbf{6.1 实验设置与复现协议}：说明硬件环境、软件零依赖复现命令、开发窗与既有验证窗的窗口划分、随机种子配置（WEPA seed 0--2 / Core 5 seeds）及 100\% 独立物理验解通过情况。
+    \item \textbf{6.2 主线 B 核心对照实验（WEPA 开发窗与既有验证窗）}：
+    \begin{itemize}
+      \item 展示 \code{fcfs}、\code{eta}、\code{hungarian}、\code{simple}、\code{wide}、\code{gate} 与 \code{hga} 在 4 个开发窗（200 次运行）及 4 个既有验证窗（156 次运行）上的 $T, R, D, F$ 与配对胜平负统计表；
+      \item 结合多 seed 分布箱线图与窗级配对对比图，论证 \code{gate} 相对规则/匹配基线的稳定优势（+5.45\% / +2.43\% / +3.87\%）以及相对 \code{wide} 削减 63\% GA 触发次数的效率收益；
+      \item 分析 \code{hga} 与 \code{wide\_adapt01} 在开发窗领先但验证窗回退的跨窗泛化现象，以及微型两车 CP-SAT 精确参照的误差检验。
+    \end{itemize}
+    \item \textbf{6.3 超参数敏感性与算力—质量权衡分析}：结合 2$\times$2 预算扫描（\code{gate\_preview3} / \code{gate\_gen8} / \code{gate\_gen24}）与 2$\times$2 自适应算子扫描（\code{wide\_adapt00..11}），展示 CPU 耗时与 $F$ 值的帕累托权衡曲线，并简述历史 \code{Double DQN} 分支对照结果。
+    \item \textbf{6.4 主线 A 多工况演进与参数扫描（Legacy / V4 / V9.1）}：汇总 205 次 5-seed 实验结果，对比 \code{bcrd\_budget}（V4 动态 +3.01\%）、\code{sipp\_batch}（Legacy 静态 $R$ 改善 +2.62\%）、\code{sipp\_stream\_bcrd}（V9.1 静态 +1.53\%）以及 \code{max\_batches} 与 \code{trial\_budget} 敏感性曲线，并附本地 Web 可视化仿真关键帧截图。
+  \end{enumerate}
+\end{planbox}

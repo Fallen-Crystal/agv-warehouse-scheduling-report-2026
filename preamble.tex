@@ -1,0 +1,211 @@
+% ============================================================================
+% 公共样式与跨平台排版配置（兼容 Overleaf XeLaTeX / TeX Live / macOS Tectonic）
+% ============================================================================
+
+% --- 页面尺寸与页边距 ---
+\usepackage[a4paper, top=2.6cm, bottom=2.5cm, left=2.6cm, right=2.6cm, headheight=15pt]{geometry}
+
+% --- 跨平台中英文字体配置（自动适配 Windows / macOS / Linux & Overleaf）---
+\usepackage{fontspec}
+\IfFontExistsTF{Times New Roman}{
+  \setmainfont{Times New Roman}
+}{
+  \IfFontExistsTF{TeX Gyre Termes}{
+    \setmainfont{TeX Gyre Termes}
+  }{}
+}
+\IfFontExistsTF{Arial}{
+  \setsansfont{Arial}
+}{
+  \IfFontExistsTF{TeX Gyre Heros}{
+    \setsansfont{TeX Gyre Heros}
+  }{}
+}
+\IfFontExistsTF{Menlo}{
+  \setmonofont[Scale=0.88]{Menlo}
+}{
+  \IfFontExistsTF{DejaVu Sans Mono}{
+    \setmonofont[Scale=0.86]{DejaVu Sans Mono}
+  }{}
+}
+
+% 正文中文字体：宋体（优先 SimSun -> Songti SC -> STSong -> FandolSong）
+\IfFontExistsTF{SimSun}{
+  \setCJKmainfont[AutoFakeBold=2.2, ItalicFont=KaiTi]{SimSun}
+}{
+  \IfFontExistsTF{Songti SC}{
+    \setCJKmainfont[BoldFont=Songti SC Bold, ItalicFont=Kaiti SC]{Songti SC}
+  }{
+    \IfFontExistsTF{STSong}{
+      \setCJKmainfont[AutoFakeBold=2.2, ItalicFont=Kaiti SC]{STSong}
+    }{
+      \setCJKmainfont[AutoFakeBold=2.2]{FandolSong}
+    }
+  }
+}
+
+% 无衬线中文字体：黑体（用于标题与图表强调）
+\IfFontExistsTF{SimHei}{
+  \setCJKsansfont[AutoFakeBold=1.8]{SimHei}
+}{
+  \IfFontExistsTF{Heiti SC}{
+    \setCJKsansfont[BoldFont=Heiti SC Medium]{Heiti SC}
+  }{
+    \IfFontExistsTF{STHeiti}{
+      \setCJKsansfont[AutoFakeBold=1.8]{STHeiti}
+    }{
+      \setCJKsansfont[AutoFakeBold=1.8]{FandolHei}
+    }
+  }
+}
+
+% 等宽中文字体与楷体定义
+\IfFontExistsTF{FangSong}{
+  \setCJKmonofont{FangSong}
+}{
+  \IfFontExistsTF{Kaiti SC}{
+    \setCJKmonofont{Kaiti SC}
+  }{
+    \setCJKmonofont{FandolFang}
+  }
+}
+\IfFontExistsTF{KaiTi}{
+  \newCJKfontfamily\kaiti{KaiTi}
+}{
+  \IfFontExistsTF{Kaiti SC}{
+    \newCJKfontfamily\kaiti{Kaiti SC}
+  }{
+    \newCJKfontfamily\kaiti{FandolKai}
+  }
+}
+
+% --- 数学、表格、图形与算法宏包 ---
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\usepackage{setspace}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, fit, backgrounds, calc}
+\usepackage[most]{tcolorbox}
+
+% --- 参考文献与超链接 ---
+\usepackage[numbers, sort&compress]{natbib}
+\usepackage[hidelinks, bookmarksnumbered=true]{hyperref}
+
+% --- 学术配色定义 ---
+\definecolor{PrimaryNavy}{HTML}{1B365D}
+\definecolor{AccentBlue}{HTML}{2B6CB0}
+\definecolor{SoftBlueBg}{HTML}{EDF2F7}
+\definecolor{AccentTeal}{HTML}{2C7A7B}
+\definecolor{SoftTealBg}{HTML}{E6FFFA}
+\definecolor{WarmAmber}{HTML}{B7791F}
+\definecolor{SoftAmberBg}{HTML}{FEFCBF}
+\definecolor{BorderGray}{HTML}{CBD5E0}
+\definecolor{MutedText}{HTML}{4A5568}
+\definecolor{TodoBg}{HTML}{F7FAFC}
+
+% --- 行距与段落间距 ---
+\onehalfspacing
+\setlength{\parskip}{3pt}
+\setlist[itemize]{itemsep=2pt, topsep=4pt, parsep=0pt}
+\setlist[enumerate]{itemsep=2pt, topsep=4pt, parsep=0pt}
+
+% --- 章节标题格式（学术论文风格）---
+\ctexset{
+  section = {
+    format = \Large\sffamily\bfseries\color{PrimaryNavy},
+    name = {,},
+    number = \arabic{section},
+    aftername = \hspace{0.6em},
+    beforeskip = 16pt plus 4pt minus 2pt,
+    afterskip = 8pt plus 2pt minus 1pt,
+  },
+  subsection = {
+    format = \large\sffamily\bfseries\color{PrimaryNavy},
+    aftername = \hspace{0.5em},
+    beforeskip = 12pt plus 3pt minus 2pt,
+    afterskip = 5pt plus 1pt minus 1pt,
+  },
+  subsubsection = {
+    format = \normalsize\sffamily\bfseries\color{black},
+    aftername = \hspace{0.5em},
+    beforeskip = 8pt plus 2pt minus 1pt,
+    afterskip = 4pt plus 1pt minus 1pt,
+  }
+}
+
+% --- 图表标题格式 ---
+\captionsetup{
+  font={small},
+  labelfont={bf, sf, color=PrimaryNavy},
+  labelsep=quad,
+  skip=6pt
+}
+
+% --- 页眉与页脚严格规则 ---
+% 第 1 页：顶部居中显示《人工智能基础》大作业 + 单横线（对应参考 P2）
+% 第 2 页及以后：完全取消页眉文字与页眉横线（删去 P4 样式），仅保留底部居中页码
+\usepackage{fancyhdr}
+
+\fancypagestyle{firstpage}{
+  \fancyhf{}
+  \fancyhead[C]{\zihao{5} 《人工智能基础》大作业}
+  \renewcommand{\headrulewidth}{0.75pt}
+  \renewcommand{\footrulewidth}{0pt}
+  \fancyfoot[C]{\small\thepage}
+}
+
+\fancypagestyle{mainbody}{
+  \fancyhf{}
+  \renewcommand{\headrulewidth}{0pt}
+  \renewcommand{\footrulewidth}{0pt}
+  \fancyfoot[C]{\small\thepage}
+}
+
+% 默认正文样式为无页眉
+\pagestyle{mainbody}
+
+% --- 待协作章节占位框（供双人讨论后续第 4-7 章内容使用）---
+\newtcolorbox{planbox}[1]{
+  enhanced,
+  breakable,
+  colback=TodoBg,
+  colframe=AccentBlue!55!gray,
+  coltitle=PrimaryNavy,
+  fonttitle=\sffamily\bfseries\small,
+  title={待协作撰写提纲：#1},
+  boxrule=0.6pt,
+  arc=2pt,
+  left=10pt,
+  right=10pt,
+  top=6pt,
+  bottom=6pt,
+  attach boxed title to top left={xshift=8pt, yshift=-2mm},
+  boxed title style={colback=white, colframe=AccentBlue!55!gray, boxrule=0.5pt, arc=2pt}
+}
+
+% --- 论文标题与双人居中署名区（严格按 P3 格式，仅 2 人）---
+\newcommand{\MakePaperTitle}[5]{%
+  \thispagestyle{firstpage}%
+  \begin{center}
+    \vspace*{2pt}
+    {\zihao{2}\sffamily\bfseries\color{PrimaryNavy} #1 \par}
+    \vspace{10pt}
+    {\zihao{4}
+      学号：#2，姓名：#3 \\[4pt]
+      学号：#4，姓名：#5 \par
+    }
+    \vspace{8pt}
+  \end{center}
+}
+
+% --- 代码标识符行内等宽排版 ---
+\newcommand{\code}[1]{\texttt{#1}}
