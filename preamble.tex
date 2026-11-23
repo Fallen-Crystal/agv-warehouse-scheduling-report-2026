@@ -1,9 +1,9 @@
 % ============================================================================
-% 公共样式与跨平台排版配置（兼容 Overleaf XeLaTeX / TeX Live / macOS Tectonic）
+% 公共样式与跨平台排版配置（参考 NeurIPS 论文排版比例，纯黑正文字体 + 彩色配图）
 % ============================================================================
 
-% --- 页面尺寸与页边距 ---
-\usepackage[a4paper, top=2.6cm, bottom=2.5cm, left=2.6cm, right=2.6cm, headheight=15pt]{geometry}
+% --- 页面尺寸与页边距（NeurIPS 单栏学术论文版芯比例）---
+\usepackage[a4paper, top=2.4cm, bottom=2.4cm, left=2.7cm, right=2.7cm, headheight=14pt]{geometry}
 
 % --- 跨平台中英文字体配置（自动适配 Windows / macOS / Linux & Overleaf）---
 \usepackage{fontspec}
@@ -22,10 +22,10 @@
   }{}
 }
 \IfFontExistsTF{Menlo}{
-  \setmonofont[Scale=0.88]{Menlo}
+  \setmonofont[Scale=0.86]{Menlo}
 }{
   \IfFontExistsTF{DejaVu Sans Mono}{
-    \setmonofont[Scale=0.86]{DejaVu Sans Mono}
+    \setmonofont[Scale=0.85]{DejaVu Sans Mono}
   }{}
 }
 
@@ -44,7 +44,7 @@
   }
 }
 
-% 无衬线中文字体：黑体（用于标题与图表强调）
+% 无衬线中文字体：黑体
 \IfFontExistsTF{SimHei}{
   \setCJKsansfont[AutoFakeBold=1.8]{SimHei}
 }{
@@ -100,7 +100,7 @@
 \usepackage[numbers, sort&compress]{natbib}
 \usepackage[hidelinks, bookmarksnumbered=true]{hyperref}
 
-% --- 学术配色定义 ---
+% --- 配图专用色彩定义（仅用于 TikZ 图形内部，标题与正文全部为纯黑）---
 \definecolor{PrimaryNavy}{HTML}{1B365D}
 \definecolor{AccentBlue}{HTML}{2B6CB0}
 \definecolor{SoftBlueBg}{HTML}{EDF2F7}
@@ -110,55 +110,59 @@
 \definecolor{SoftAmberBg}{HTML}{FEFCBF}
 \definecolor{BorderGray}{HTML}{CBD5E0}
 \definecolor{MutedText}{HTML}{4A5568}
-\definecolor{TodoBg}{HTML}{F7FAFC}
 
-% --- 行距与段落间距 ---
-\onehalfspacing
-\setlength{\parskip}{3pt}
-\setlist[itemize]{itemsep=2pt, topsep=4pt, parsep=0pt}
-\setlist[enumerate]{itemsep=2pt, topsep=4pt, parsep=0pt}
+% --- 紧凑学术行距与段落间距（对齐 NeurIPS 10pt 论文视觉密度）---
+\linespread{1.18}
+\setlength{\parskip}{3.5pt}
+\setlength{\emergencystretch}{2em}
+\setlist[itemize]{itemsep=1.5pt, topsep=3pt, parsep=0pt}
+\setlist[enumerate]{itemsep=1.5pt, topsep=3pt, parsep=0pt}
 
-% --- 章节标题格式（学术论文风格，纯黑字体）---
+% --- 章节标题格式（参考 NeurIPS 分级字号：纯黑加粗，紧凑克制）---
+% 正文基准为 10pt (五号 10.5pt)：
+% 一级标题 \section: 12pt 加粗
+% 二级标题 \subsection: 10.5pt 加粗
+% 三级标题 \subsubsection: 10pt 加粗
 \ctexset{
   section = {
-    format = \Large\sffamily\bfseries,
+    format = \fontsize{12pt}{15pt}\selectfont\bfseries,
     name = {,},
     number = \arabic{section},
-    aftername = \hspace{0.6em},
-    beforeskip = 16pt plus 4pt minus 2pt,
-    afterskip = 8pt plus 2pt minus 1pt,
-  },
-  subsection = {
-    format = \large\sffamily\bfseries,
-    aftername = \hspace{0.5em},
+    aftername = \hspace{0.55em},
     beforeskip = 12pt plus 3pt minus 2pt,
     afterskip = 5pt plus 1pt minus 1pt,
   },
-  subsubsection = {
-    format = \normalsize\sffamily\bfseries,
-    aftername = \hspace{0.5em},
-    beforeskip = 8pt plus 2pt minus 1pt,
+  subsection = {
+    format = \fontsize{10.5pt}{13.5pt}\selectfont\bfseries,
+    aftername = \hspace{0.45em},
+    beforeskip = 9pt plus 2pt minus 1pt,
     afterskip = 4pt plus 1pt minus 1pt,
+  },
+  subsubsection = {
+    format = \fontsize{10pt}{12.5pt}\selectfont\bfseries,
+    aftername = \hspace{0.4em},
+    beforeskip = 6pt plus 1pt minus 1pt,
+    afterskip = 3pt plus 1pt minus 1pt,
   }
 }
 
-% --- 图表标题格式（纯黑字体）---
+% --- 图表标题格式（纯黑紧凑 9pt）---
 \captionsetup{
-  font={small},
-  labelfont={bf, sf},
-  labelsep=quad,
-  skip=6pt
+  font={footnotesize},
+  labelfont={bf},
+  labelsep=colon,
+  skip=5pt
 }
 
 % --- 页眉与页脚严格规则 ---
-% 第 1 页：顶部居中显示《人工智能基础》大作业 + 单横线（对应参考 P2）
-% 第 2 页及以后：完全取消页眉文字与页眉横线（删去 P4 样式），仅保留底部居中页码
+% 第 1 页：顶部居中显示《人工智能基础》大作业 + 单横线（对应 P2）
+% 第 2 页及以后：完全取消页眉文字与页眉横线（删去 P4），仅保留底部居中页码
 \usepackage{fancyhdr}
 
 \fancypagestyle{firstpage}{
   \fancyhf{}
-  \fancyhead[C]{\zihao{5} 《人工智能基础》大作业}
-  \renewcommand{\headrulewidth}{0.75pt}
+  \fancyhead[C]{\fontsize{9.5pt}{11pt}\selectfont 《人工智能基础》大作业}
+  \renewcommand{\headrulewidth}{0.6pt}
   \renewcommand{\footrulewidth}{0pt}
   \fancyfoot[C]{\small\thepage}
 }
@@ -170,37 +174,43 @@
   \fancyfoot[C]{\small\thepage}
 }
 
-% 默认正文样式为无页眉
 \pagestyle{mainbody}
 
-% --- 待协作章节占位框（供双人讨论后续第 4-7 章内容使用，纯黑文字配浅灰边框）---
-\newtcolorbox{planbox}[1]{
+% --- 队友留白占位框（纯黑文字配浅灰虚线框，标明对应队友提交模块）---
+\newtcolorbox{teammatebox}[1]{
   enhanced,
   breakable,
   colback=black!2,
-  colframe=black!40,
+  colframe=black!45,
   coltitle=black,
-  fonttitle=\sffamily\bfseries\small,
-  title={待协作撰写提纲：#1},
-  boxrule=0.6pt,
+  fonttitle=\bfseries\footnotesize,
+  title={队友负责模块留白（待队友补充）：#1},
+  boxrule=0.5pt,
   arc=2pt,
-  left=10pt,
-  right=10pt,
-  top=6pt,
-  bottom=6pt,
+  left=8pt,
+  right=8pt,
+  top=5pt,
+  bottom=5pt,
+  fontupper=\footnotesize,
   attach boxed title to top left={xshift=8pt, yshift=-2mm},
-  boxed title style={colback=white, colframe=black!40, boxrule=0.5pt, arc=2pt}
+  boxed title style={colback=white, colframe=black!45, boxrule=0.5pt, arc=2pt}
 }
 
-% --- 论文标题与双人居中署名区（严格按 P3 格式，仅 2 人，纯黑字体）---
+% --- 论文标题与双人居中署名区（参考上传 NeurIPS 论文标题与作者字号比例，纯黑）---
+% 标题：上下双横线（上粗 2.5pt、下细 0.8pt），字号 16pt 加粗居中
+% 学号与姓名：与 NeurIPS 作者栏一致采用 10pt 加粗居中，两行紧凑排列
 \newcommand{\MakePaperTitle}[5]{%
   \thispagestyle{firstpage}%
   \begin{center}
     \vspace*{2pt}
-    {\zihao{2}\sffamily\bfseries #1 \par}
-    \vspace{10pt}
-    {\zihao{4}
-      学号：#2，姓名：#3 \\[4pt]
+    \noindent\rule{\textwidth}{2.4pt}\par
+    \vspace{6pt}
+    {\fontsize{15.5pt}{21pt}\selectfont\bfseries #1 \par}
+    \vspace{4pt}
+    \noindent\rule{\textwidth}{0.7pt}\par
+    \vspace{9pt}
+    {\fontsize{10pt}{14.5pt}\selectfont\bfseries
+      学号：#2，姓名：#3 \\[2pt]
       学号：#4，姓名：#5 \par
     }
     \vspace{8pt}

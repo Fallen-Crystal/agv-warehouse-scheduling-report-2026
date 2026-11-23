@@ -1,15 +1,81 @@
 % ============================================================================
-% 第 4 章 问题形式化建模与物理约束（待与队友商议合写）
+% 第 4 章 问题形式化建模与物理约束
 % ============================================================================
 \section{问题形式化建模与物理约束}
 \label{sec:modeling}
 
-\begin{planbox}{第 4 章写作规划（供双人分工确认）}
-  本章拟以严谨的运筹学与多智能体路径规划（MAPF）记号给出全系统的统一数学表述，建议细分为以下小节并在商定分工后补充完整公式与示意配图：
+为在统一理论框架下刻画多 AGV 并发取送货调度的空间几何、运动冲突与仓储业务规则，本章首先建立离散栅格拓扑与分层/混合货架模型（对应自研通用引擎主线 A），给出时空无碰撞约束、因果观测边界及评价指标定义；针对 V9.1 开放流关闭契约、空闲待命策略形式化对比以及 WEPAStacks 真实订单流映射规则（对应队友负责模块），在相应小节预留结构化位置。
+
+\subsection{离散网格拓扑与分层/混合货架几何建模（Legacy / V4 / V9）}
+
+设仓库平面被离散化为四邻接有向栅格图 $G = (V, E)$，其中每个顶点 $u = (x_u, y_u) \in V \subset \mathbb{Z}^2$ 代表一个单位面积栅格，有向边集合定义为 $E = \{(u, v) \in V \times V \mid \|u - v\|_1 = 1 \text{ 或 } u = v\}$（含原地等待动作 $(u, u)$）。时间轴按单位步长离散化为 $t \in \{0, 1, 2, \dots, T_{\max}\}$。顶点集 $V$ 按物理功能划分为互不相交或受控重叠的子集：普通通行通道 $V_{\text{aisle}}$、静态障碍与立柱设备区 $V_{\text{obs}}$、货架存储格 $V_{\text{shelf}}$、交付工作站 $V_{\text{station}}$ 以及车辆专属停靠区（车库） $V_{\text{home}} = \{h_1, \dots, h_M\}$，其中 $M$ 为 AGV 数量，车队集合记为 $\mathcal{V} = \{1, 2, \dots, M\}$。
+
+随着项目建模从基础栅格向真实立体货架演进，系统依次定义了三类递进的仓库几何与货架工艺约束：
+
+\begin{enumerate}
+  \item \textbf{Legacy 基础规则栅格模型}：货架访问点直接位于可通行栅格集 $V_{\text{aisle}}$，每项任务 $j \in \mathcal{J}$ 由三元组 $(r_j, s_j, d_j)$ 表示，分别对应发布时刻 $r_j \in \mathbb{N}$、取货坐标 $s_j$ 与交付坐标 $d_j$，单次装货与卸货均占用固定单位时间步。
+  \item \textbf{V4 单面多层立体货架模型（\code{math-v4-integrated}）}：引入多层垂直货架与层序工艺约束。每个任务扩展为五元组 $j = (r_j, b_j, l_j, p_j, d_j)$，其中 $b_j \in V_{\text{shelf}}$ 为物理货位格，$l_j \in \{1, 2, \dots, L_{\max}\}$ 为任务所在货架层高，$p_j \in V_{\text{aisle}}$ 为该单面货架唯一合法的通道停靠取货格，$d_j \in V_{\text{station}}$ 为目标交付站。其核心工艺约束包括：
+  \begin{itemize}
+    \item \emph{层高相关装卸时长}：车辆抵达停靠格 $p_j$ 后，升降机构执行取货所需的连续原地服务时长与层高成正比，即
+    \begin{equation}
+      \tau_{\text{load}}(j) = 2\,l_j, \qquad \tau_{\text{unload}}(j) = 1
+      \label{eq:v4-service-time}
+    \end{equation}
+    在装货区间 $[t_{\text{arr}}, t_{\text{arr}} + \tau_{\text{load}}(j) - 1]$ 内，执行车辆必须连续静止占据停靠格 $p_j$，不可被中断或推移。
+    \item \emph{同面货架层序解锁偏序约束}：对于共享同一货位面 $b$ 的所有已发布未完成任务集合 $\mathcal{J}_t(b) = \{j \in \mathcal{J} \mid b_j = b,\; r_j \le t,\; j \text{ 未完成}\}$，仅当前最高层任务 $j^\star = \arg\max_{j \in \mathcal{J}_t(b)} l_j$ 处于可指派解锁状态；在该任务完成装货并释放货架面锁之前，同一货架面上的其余下层任务均不得被指派或启动装货。
+    \item \emph{交付站终端资源即卸即走约束}：交付站 $d_j \in V_{\text{station}}$ 作为高竞争终端资源，仅允许绑定该站点的载货车辆进入并在站内停留 $\tau_{\text{unload}}(j)=1$ 步完成卸货；卸货完成的下一时刻 $t_{\text{dep}} = t_{\text{unload}} + 1$ 必须立即驶离交付站格，禁止在交付站内原地滞留待命。
+  \end{itemize}
+  \item \textbf{V9 混合背靠背货架与显式选侧模型（\code{mixed-v9}）}：在真实仓库中常同时存在两类货架：一是单排单层货架（$l_j = 1$，左右或上下两侧相邻通道均可停靠取货，即合法取货点集合 $|\mathcal{P}(b_j)| = 2$）；二是水平或垂直成对排列的背靠背多层货架（每排仅外侧朝向通道的一侧可取货，$|\mathcal{P}(b_j)| = 1$，$l_j \in \{1,\dots,L_{\max}\}$）。此时上层调度决策需从单纯的“车—单指派”扩展为三元组决策 $(i, j, p)$，其中 $i \in \mathcal{V}$，$j \in \mathcal{J}$，$p \in \mathcal{P}(b_j)$ 为显式选定的取货停靠侧。同时，空闲车辆在尚无新任务可接时支持最多 $\Delta_{\text{standby}} = 8$ 步的因果有界安全待命控制，以减少过早长途返库带来的无效空驶。
+\end{enumerate}
+
+\subsection{离散时空无碰撞约束、因果观测边界与通用评价指标}
+
+设车辆 $i \in \mathcal{V}$ 在整个仿真时域 $[0, T_{\text{end}}]$ 内的离散轨迹为映射 $\pi_i: \{0, 1, \dots, T_{\text{end}}\} \to V$。一套物理合法的多车调度轨迹族 $\{\pi_i\}_{i=1}^M$ 必须在任意离散时刻满足以下硬约束：
+
+\begin{align}
+  &\text{运动连通性：} && (\pi_i(t), \pi_i(t+1)) \in E, && \forall i \in \mathcal{V},\; \forall t \in [0, T_{\text{end}}-1] \label{eq:motion-conn} \\
+  &\text{障碍物规避：} && \pi_i(t) \notin V_{\text{obs}} \cup V_{\text{shelf}}, && \forall i \in \mathcal{V},\; \forall t \in [0, T_{\text{end}}] \label{eq:obs-avoid} \\
+  &\text{顶点互斥（无碰撞）：} && \pi_i(t) \neq \pi_{i'}(t), && \forall i \neq i' \in \mathcal{V},\; \forall t \in [0, T_{\text{end}}] \label{eq:vertex-mutex} \\
+  &\text{相向换边互斥：} && \neg\big(\pi_i(t) = \pi_{i'}(t+1) \wedge \pi_i(t+1) = \pi_{i'}(t)\big), && \forall i \neq i' \in \mathcal{V},\; \forall t \in [0, T_{\text{end}}-1] \label{eq:edge-mutex} \\
+  &\text{起始与最终返库：} && \pi_i(0) = h_i,\quad \pi_i(T_{\text{end}}) = h_i, && \forall i \in \mathcal{V} \label{eq:home-return}
+\end{align}
+
+\paragraph{在线因果观测边界。} 在动态订单场景下，任意决策时刻 $t$ 的可见状态观测 $\mathcal{O}_t$ 严格限制为 $\mathcal{O}_t = \big(\mathcal{J}_{\le t},\; \{q_i(t)\}_{i=1}^M,\; \mathcal{R}_{\ge t}\big)$，其中 $\mathcal{J}_{\le t} = \{j \in \mathcal{J} \mid r_j \le t\}$ 为截至当前时刻已发布的订单子集，$q_i(t)$ 为车辆 $i$ 的当前位姿与在途任务绑定状态，$\mathcal{R}_{\ge t}$ 为在途车辆已承诺的未来时空预约表。任何在线算法均不得访问 $r_j > t$ 的未发布订单信息，且已启动装货或已绑定的在途任务遵循不撤销承诺原则。
+
+\paragraph{评价指标、松弛下界与小规模精确参照（主线 A）。} 记每笔任务 $j \in \mathcal{J}$ 的卸货完成时刻为 $C_j$，系统核心基础指标定义为：
+\begin{equation}
+  T = \max_{j \in \mathcal{J}} C_j, \qquad
+  R = \frac{1}{|\mathcal{J}|}\sum_{j \in \mathcal{J}} (C_j - r_j), \qquad
+  D = \sum_{i \in \mathcal{V}} \sum_{t=0}^{T_{\text{end}}-1} \mathbb{I}\big(\pi_i(t+1) \neq \pi_i(t)\big)
+  \label{eq:trd-def}
+\end{equation}
+在主线 A 的 V4 与 V9.1 多尺度评测中，为消除不同地图尺寸与任务量纲差异，以同一场景下固定时空 A* 距离贪心基线测得的 $(T_{\mathrm{ref}}, R_{\mathrm{ref}}, D_{\mathrm{ref}})$ 为离线参照分母，定义归一化综合评分函数：
+\begin{equation}
+  F_{\text{Core}} = 0.5\,\frac{T}{T_{\mathrm{ref}}} + 0.3\,\frac{R}{R_{\mathrm{ref}}} + 0.2\,\frac{D}{D_{\mathrm{ref}}}
+  \label{eq:f-core}
+\end{equation}
+候选方案相对参照方案的配对改善率统一定义为 $\Delta F (\%) = 100\% \times (1 - F_{\text{cand}} / F_{\text{base}})$，正值代表综合指标降低（方案更优）。
+
+此外，为离线诊断算法的理论优化空间，我们在 \code{evaluation/bounds.py} 中推导并实现了忽略多车避碰与层序锁定的确定性松弛下界 $(LB_T, LB_R, LB_D)$：对每单 $j$ 计算最优取货侧下的最短独立完成下界 $c_j^{\min} = r_j + \min_{p \in \mathcal{P}(b_j)}\big(d_G^{\min}(p) + \tau_{\text{load}}(j) + d_G(p, d_j) + 1\big)$，结合全车队总服务工作量与闭合二分匹配空驶下界给出理论松弛基准；并在 \code{evaluation/oracle.py} 中实现了面向微型算例（如 $M \le 3, |\mathcal{J}| \le 7$）的精确分支定界求解器（Exact Oracle），以松弛下界剪枝枚举最优任务分配序列并调用无碰撞规划验证，用于校准启发式算法的逼近精度。
+
+\subsection{V9.1 开放流关闭契约、空闲待命策略建模与验解边界}
+
+\begin{teammatebox}{4.3 节留白 —— 对应队友 \code{Betty-dey} 提交（\code{ceed0db}, \code{a9c469a..81dc593}）}
+  本小节由队友补充撰写，对应代码仓库中 \code{docs/modeling-v9.1.md}、\code{docs/idle-policy-comparison.md} 与 \code{evaluation/validation.py} 的边界规范，建议涵盖：
   \begin{enumerate}
-    \item \textbf{4.1 仓库拓扑图与多层货架建模}：定义四邻接离散栅格图 $G=(V,E)$、通道/货架/立柱/交付站/停靠区集合，分别给出主线 A（Legacy / V4 单面多层 / V9.1 混合背靠背货架）与主线 B（$62\times 47$、6 车、5 层 WEPAStacks 映射网格）的布局示意图。
-    \item \textbf{4.2 订单任务与生命周期状态机}：形式化描述订单发布时刻 $r_j$、SKU 与货架层高 $l_j$、入/出库任务重叠规则、装货持续时间（如 V4 的 $2 l_j$ 步）、交付站卸货即离、波次间安全待命及流关闭（\code{close}）后的最终返库状态转移。
-    \item \textbf{4.3 时空无碰撞与仓储工艺硬约束}：列出离散步长下顶点互斥约束、相向边交换互斥约束、连续装卸占位不变性、同面货架层序解锁偏序关系以及在线调度的因果信息边界条件。
-    \item \textbf{4.4 评价指标与目标函数定义}：给出完工时间 $T$、平均响应时间 $R$、含返库总里程 $D$、主线 B 固定尺度线性目标 $F_{\text{WEPA}}$、主线 A 参照归一化目标 $F_{\text{Core}}$ 以及统一改善率公式的严格定义；并简要说明微型两车 CP-SAT 精确参照模型的作用。
+    \item \textbf{开放订单流显式关闭事件（\code{close}）与两阶段生命周期契约}：开放流阶段（$t < t_{\text{close}}$）与收尾返库阶段（$t \ge t_{\text{close}}$ 且全部已发布订单完成后）的车辆行为转换形式化定义；
+    \item \textbf{三类空闲待命策略的形式化建模}：安全通道原地待命（\code{stay\_safe}）、可中断提前返库（\code{return\_interruptible}）与靠近交付站待命（\code{near\_delivery}）的状态转移规则；
+    \item \textbf{独立物理验解边界条件}：畸形轨迹拒绝、冗余返库动作拦截、完成时刻填充检测以及零需求（Zero-Demand）场景的边界评分定义。
   \end{enumerate}
-\end{planbox}
+\end{teammatebox}
+
+\subsection{WEPAStacks 真实工业订单流映射模型与固定尺度线性目标}
+
+\begin{teammatebox}{4.4 节留白 —— 对应队友 \code{Betty-dey} 提交（\code{ef73cd5} \code{research/recommended-20261024/docs/数学模型与规则.md}）}
+  本小节由队友补充撰写，对应主线 B 的形式化建模文档，建议涵盖：
+  \begin{enumerate}
+    \item \textbf{WEPAStacks 真实数据到 $62\times 47$ 立体仓库网格的映射规则}：411,830 条原始入/出库请求的时间窗口抽样、6 辆 AGV 与 5 层货架参数、货位映射种子（Seed 17）及初始库存填充一致性约束；
+    \item \textbf{入库与出库自然部分重叠及一单一单位运输业务规则}；
+    \item \textbf{去基线依赖的固定尺度线性目标函数 $F_{\text{WEPA}} = 0.5\,T/900 + 0.3\,R/900 + 0.2\,D/5400$} 的尺度选取依据，以及微型两车静态算例的 OR-Tools CP-SAT 整数规划精确参照模型。
+  \end{enumerate}
+\end{teammatebox}

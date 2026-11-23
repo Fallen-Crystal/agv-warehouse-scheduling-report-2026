@@ -1,20 +1,98 @@
 % ============================================================================
-% 第 5 章 核心调度与路径规划算法设计（待与队友商议合写）
+% 第 5 章 核心调度与路径规划算法设计
 % ============================================================================
 \section{核心调度与路径规划算法设计}
 \label{sec:algorithms}
 
-\begin{planbox}{第 5 章写作规划（供双人分工确认）}
-  本章重点剖析系统最终采用的核心算法机理（建议配以规范伪代码、流程图与时间复杂度分析，避免整段粘贴源码）：
+围绕第~\ref{sec:modeling} 章建立的形式化模型，本章深入剖析系统核心调度与路径规划算法的设计机理。其中，底层增量预约表与 SIPP 安全区间路径规划（5.1 节）、主线 A 的拥堵关联 LNS 联合修复、静态批滚动与 BCRD 反事实影子试派及 V9.1 定位/尾部保护（5.2 节）、主线 B 的自适应遗传算子与 Double DQN 元调度探索（5.4 节）以及零依赖工程服务架构（5.5 节）已完整撰述；主线 B 最终推荐方案 \code{gate} 的内部算子与两级预演细节（5.3 节，对应队友负责模块）预留结构化位置。
+
+\subsection{基于增量时空预约表的安全区间路径规划（SIPP）与几何加速}
+
+在密集货架与窄巷道环境中，传统时空扩展 A* 以单步状态 $(u, t)$ 为搜索节点，当规划时域拉长或存在持续 $2\,l_j$ 步的装货等待时，开放列表（Open List）节点数急剧膨胀。为此，我们在 \code{src/agv/planning/sipp.py} 与 \code{reservations.py} 中设计了面向连续装卸占位与多段行程拼接的增强型安全区间路径规划（SIPP）引擎~\cite{phillips2011sipp}。
+
+\paragraph{增量索引式时空预约表。} 预约表 $\mathcal{R}$ 维护全体在途及已承诺车辆的未来时空占用：一是顶点预约集 $\mathcal{R}_V(u) \subset \mathbb{N}$，记录栅格 $u$ 被占用的离散时刻；二是有向边预约集 $\mathcal{R}_E(u, v) \subset \mathbb{N}$，记录时刻 $t \to t+1$ 从 $u$ 移向 $v$ 的边占用（用于以 $O(1)$ 时间检测式~\eqref{eq:edge-mutex} 的逆向换边冲突）；三是每个栅格的已承诺最大占用时域 $t_{\max}(u)$。在进行单车重规划或 LNS 局部车队重排时，预约表支持按车辆 ID 增量撤销与写时复制（Copy-on-Write）克隆，避免全表重建开销。
+
+\paragraph{安全时间区间压缩与连续服务嵌入。} 对于任意栅格 $u \in V$，将其在时域 $[0, T_{\max}]$ 上未被 $\mathcal{R}_V(u)$ 占用的最大连续空闲整数区间定义为安全区间集合 $\mathcal{I}(u) = \{[a_1, b_1], [a_2, b_2], \dots, [a_k, b_k]\}$。SIPP 搜索状态定义为三元组 $s = (u, [a, b], t_{\text{earliest}})$，其中 $[a, b] \in \mathcal{I}(u)$，$t_{\text{earliest}} \in [a, b]$ 为车辆到达该区间的最早可行时刻。当从状态 $(u, [a, b], t_{\text{earliest}})$ 向邻居栅格 $v$（安全区间 $[a', b'] \in \mathcal{I}(v)$）扩展时：
+\begin{enumerate}
+  \item 计算最早可尝试跨越时刻 $t_{\text{start}} = \max(t_{\text{earliest}}, a' - 1)$ 与最晚离开时刻 $t_{\text{limit}} = \min(b, b' - 1)$；
+  \item 在 $[t_{\text{start}}, t_{\text{limit}}]$ 内扫描首个满足 $(t+1) \notin \mathcal{R}_V(v)$ 且 $t \notin \mathcal{R}_E(v, u)$（无逆向换边）的时刻 $t^\star$，直接生成后继状态 $(v, [a', b'], t^\star + 1)$，无需枚举中间冗余等待步；
+  \item 当目标栅格 $v = p_j$ 需要执行连续 $\tau$ 步装卸服务时，直接校验区间包含条件 $[t^\star + 1,\; t^\star + \tau] \subseteq [a', b']$，仅当整个连续服务窗口无冲突时方才接纳该到达时刻。
+\end{enumerate}
+
+\paragraph{多段行程拼接与几何距离缓存。} 单笔任务的完整执行轨迹由 \code{planning/pickup.py} 拼接为“当前位姿 $\to$ 取货停靠格 $p_j$（含连续 $\tau_{\text{load}}(j)$ 步装货）$\to$ 交付站 $d_j$（含 1 步卸货及最多 8 步延迟入站缓冲以绕开出口瞬时拥堵）$\to$ 即刻驶离交付站至安全待命点或车库 $h_i$”的原子闭环路径。同时，\code{planning/geometry.py} 利用不可变地图指纹与线程局部缓存（Thread-Local Cache）预计算全图含障碍物真实最短路距离 $d_G(u, v)$ 作为 SIPP 的一致启发函数 $h(u)$，大幅削减无效节点扩展。
+
+\subsection{拥堵关联 LNS 修复、静态批滚动与 BCRD 影子试派（主线 A）}
+
+在 SIPP 高效单车规划的基础上，主线 A 针对不同场景负载特性构建了三类协同决策与修复算法：
+
+\subsubsection{拥堵关联大邻域联合修复（LNS）与静态首轮批滚动}
+
+顺序贪心规划中，先提交轨迹的车辆在预约表中具有绝对优先权，常导致后规划车辆在窄巷道出口发生大段绕行。为此，\code{planning/joint.py} 实现了基于冲突诊断的大邻域搜索（LNS）联合后缀重排~\cite{li2021mapflns}：
+\begin{itemize}
+  \item \textbf{拥堵关联邻域提取}：计算各在途车辆当前实际剩余路径长度与静态理想最短路之差（绕行与等待延迟 $\delta_i$），选取延迟最高的主瓶颈车辆 $i^\star$，并在时空预约表上检索与其理想路径在未来窗口内存在空间交叠或接近的关联车辆，构成规模为 $k \in \{2, 3\}$ 的局部重排邻域 $\mathcal{N} \subset \mathcal{V}$。
+  \item \textbf{预算受限排列重规划与候选排序}：在写时复制的预约表副本中临时移除 $\mathcal{N}$ 内车辆的未执行路径后缀，按不同优先级排列（或经由 \code{src/agv/learning/} 中基于 8 维时空拥堵特征离线训练的标准库岭回归评分器预排序，限制候选尝试预算 \code{trial\_budget}）重新调用 SIPP 顺序规划。若新轨迹族严格降低邻域总流程时间且通过全未来冲突审计，则原子替换原计划（对应 \code{sipp\_conflict} / \code{sipp\_budget} / \code{sipp\_learned}）。
+  \item \textbf{静态首轮有序批次滚动（\code{sipp\_batch}）}：针对初始时刻全量订单一次性释放的静态并发场景，\code{dispatch/initial\_batch.py} 在 $t=0$ 构造多组首轮多车分配排列，在轻量沙盒内滚动推演至完工并选取总流程时间最优的首轮分配提交，从源头改善多车初始流向分布。
+\end{itemize}
+
+\subsubsection{有序批次反事实影子试派（BCRD）与事件驱动无损加速}
+
+在 V4 分层货架与高积压动态场景下，单步贪心或瞬时二分匹配无法预判当前派单对后续同面下层任务解锁及交付站排队的影响。我们在 \code{dispatch/bcrd.py} 中提出了\textbf{有序批次反事实影子试派（Ordered-Batch Counterfactual Rollout Dispatch, BCRD）}：
+
+\begin{enumerate}
+  \item \textbf{门控触发条件}：为确保低负载场景下的零额外开销，仅当当前保底贪心批次可同时指派至少 2 辆空闲车，且当前合法解锁待派订单数满足 $|\mathcal{J}_{\text{ready}}(t)| \ge 3\,|\mathcal{V}_{\text{avail}}(t)|$ 时，才激活影子试派；否则直接返回保底合法贪心指派。
+  \item \textbf{确定性多样化候选批次生成}：从当前已解锁可见订单池中，按确定性规则依次生成\textbf{距离贪心（Greedy）、最小代价匹配（Matching）、最早发布优先（Oldest）、最长层高作业优先（Longest）、受限资源优先及逆序提交}共 6 类有序指派批次，去重后截断至最多 $B_{\max}=4$ 个候选批次 $\{\mathcal{B}_0, \mathcal{B}_1, \dots, \mathcal{B}_{K-1}\}$（其中 $\mathcal{B}_0$ 固定为保底贪心批次）。
+  \item \textbf{因果影子环境反事实前瞻与在线代理评分}：对每个候选批次 $\mathcal{B}_k$，基于当前可见观测 $\mathcal{O}_t$ 克隆一个与未来未发布订单严格隔离的影子仿真环境，先原子执行 $\mathcal{B}_k$，随后在影子环境内统一以轻量合法贪心滚动推演直至当前可见订单池全部排空，测得影子预测指标 $(\hat{T}_k, \hat{R}_k, \hat{D}_k)$。以保底批次 $\mathcal{B}_0$ 的影子预测值 $(\hat{T}_0, \hat{R}_0, \hat{D}_0)$ 为在线自归一化分母，计算反事实代理评分：
+  \begin{equation}
+    \hat{F}_{\text{shadow}}(\mathcal{B}_k) = 0.5\,\frac{\hat{T}_k}{\hat{T}_0} + 0.3\,\frac{\hat{R}_k}{\hat{R}_0} + 0.2\,\frac{\hat{D}_k}{\hat{D}_0}
+    \label{eq:bcrd-proxy}
+  \end{equation}
+  同时设置严格的计算预算护栏（单次决策最多 480 次影子路由调用、120,000 次节点扩展软上限与 2,400 仿真步上限）；若任一护栏触发则安全回退至当前已完整评估的最优批次或 $\mathcal{B}_0$。
+  \item \textbf{事件驱动影子推进（无损 CPU 加速）}：在影子推演中，当全车队均处于在途忙碌状态或当前可见订单已全部派完时，中间时间步不会发生任何新派单决策。我们通过识别此类确定性无决策区间，直接跳过空策略评估并按事件步长 $\Delta t$ 推进轨迹，在保证所有物理轨迹、随机数状态与评分结果 100\% 逐字节等价的前提下，将留出集平均 CPU 开销削减 43.2\%（加速比 $1.50\times$）。
+\end{enumerate}
+
+\subsubsection{V9.1 历史热度安全选点、SIPP-ETA 矩形匹配与 P90 尾部保护}
+
+面向 V9.1 混合背靠背货架与持续订单流，我们在 \code{dispatch/positioning.py} 与 \code{stream.py} 中进一步提出了三项协同机制：
+\begin{itemize}
+  \item \textbf{基于 Tarjan 割点过滤与时空衰减热度的安全待命选点}：在地图初始化时，利用迭代版 Tarjan 算法剔除图割点（Articulation Points）、度数 $\le 2$ 的窄通道格、车库/交付站及货架入口邻格，生成静态绝对安全待命候选集 $V_{\text{safe}}$。在线运行时，仅根据历史已发布订单的取货位置累计时空指数衰减热度：
+  \begin{equation}
+    H(u, t) = \sum_{j:\, r_j \le t} \sum_{p \in \mathcal{P}(b_j)} \frac{1}{|\mathcal{P}(b_j)|}\exp\!\left(-\frac{t - r_j}{200}\right)\exp\!\left(-\frac{\|u - p\|_1}{18}\right)
+    \label{eq:heat-positioning}
+  \end{equation}
+  按最近交付站分区限制每区最多 2 个共享待命目标，以 $c(i, u) = d_G(q_i, u) - 32\,\tilde{H}(u, t) + 3\,\mathbb{I}(u \neq u_i^{\text{prev}})$ 为代价调用纯 Python 矩形 Hungarian 算法分配待命点，并在规划外出重定位段时同步绑定完整返库兜底后缀，确保新单到达或同伴通行冲突时可随时原子打断或礼让。
+  \item \textbf{SIPP-ETA 矩形匹配与有限主动延迟}：利用真实 SIPP（计入合法取货侧、层高装货时长与在途预约）精确估算每对“可用车—可派单”的预计交付完成时刻（ETA）并求解矩形最小代价匹配；当存在将于 16 步内完工的在途车辆、且等待其接单可使预计交付提前超过 3 步（同时订单等待年龄 $<16$ 步）时，允许暂缓绑定最多 16 步（\code{sipp\_position\_delay\_dispatch}，记为 \code{G4}）。
+  \item \textbf{流式 BCRD 与预测 P90 尾部保护（\code{sipp\_stream\_bcrd\_tail}，记为 \code{B1}）}：针对 BCRD 倾向于优先压缩完工时间 $T$ 而偶发拉长个别短单等待的现象，在影子评估中将历史已完单响应耗时与影子预测未完单响应耗时合并计算完整预测 90\% 分位数 $\hat{P}_{90}(\mathcal{B}_k)$，增加硬性尾部准入约束 $\hat{P}_{90}(\mathcal{B}_k) \le \hat{P}_{90}(\mathcal{B}_0)$，从源头拦截牺牲尾部服务体验的激进批次。
+\end{itemize}
+
+\subsection{面向 WEPA 真实订单流的事件门控软分区联合遗传算法（\code{gate}）}
+
+\begin{teammatebox}{5.3 节留白 —— 对应队友 \code{Betty-dey} 提交（\code{ef73cd5}, \code{d1d36f1} \code{research/recommended-20261024/}）}
+  本小节由队友补充撰写，对应主线 B 推荐方案 \code{gate} 的核心算法设计（详见代码仓库 \code{docs/算法主线与接口.md} 及 \code{current/code-guide/improved/}），建议涵盖：
   \begin{enumerate}
-    \item \textbf{5.1 基于增量时空预约表的 SIPP 路径规划}：阐述如何将栅格上的动态障碍占位压缩为最大安全时间区间，支持单车“就位—取货连续占位—送货—离站—返库”组合路径拼接，以及增量预约表对搜索效率的加速作用~\cite{phillips2011sipp}。
-    \item \textbf{5.2 面向真实订单流的事件门控软分区联合 GA（\code{gate}）}：
-    \begin{itemize}
-      \item 阐述事件门控触发条件与低负载位掩码动态规划分支；
-      \item 详述软分区联合染色体编码、交叉/变异算子与多候选种群管理~\cite{vidal2022hgs}；
-      \item 说明“快速代理评估 + Top-$K$ 候选真实预约表 SIPP 物理预演”的两级评分机制，以及 \code{gate\_preview3} 轻量档的预算权衡原理。
-    \end{itemize}
-    \item \textbf{5.3 通用引擎核心机制（LNS 联合修复与 BCRD 影子试派）}：介绍主线 A 中的拥堵关联车队邻域选择与 LNS 后缀重排（\code{sipp\_budget} / \code{sipp\_batch}）~\cite{li2021mapflns}，以及高积压工况下独立影子环境前瞻试派（\code{bcrd\_budget} / \code{sipp\_stream\_bcrd}）的算法流程。
-    \item \textbf{5.4 工程架构与独立物理验解设计}：概述零第三方依赖标准库实现、原子提交审计、独立物理验解模块（\code{validation.py} / \code{verify.py}）以及本地 Web 交互式仿真可视化界面（\code{agv serve}）。
+    \item \textbf{事件门控触发机制与低负载精确分支}：在线滚动触发条件、低负载下基于位掩码动态规划（Bitmask DP）或精确枚举的直接指派逻辑；
+    \item \textbf{软分区联合 GA 编码与进化算子}：多车任务序列的联合染色体表征、软分区距离先验、种群初始化（含 \code{simple} 与 \code{wide} 的预算对比）、交叉与变异算子伪代码；
+    \item \textbf{“轻量代理评估 + Top-$K$ 候选预约表 SIPP 物理预演”两级打分机制}：快速代理模型如何筛选候选，以及真实 SIPP 预约表预演如何保证最终提交解的物理可行性与全局协调性；
+    \item \textbf{对照算子设计}：匈牙利混合初始化（\code{hga}）、开放流终点预测、瓶颈邻域修复及双车耦合局部重排的设计思路。
   \end{enumerate}
-\end{planbox}
+\end{teammatebox}
+
+\subsection{双概率自适应遗传算子与 Double DQN 元调度探索（主线 B 扩展分支）}
+
+在主线 B 联合遗传算法的基础上，为探究进化超参数动态调节与深度强化学习（DRL）在线算子选择的潜力，我们在 \code{research/dqn-experiment-v2/} 及敏感性实验框架中设计并评估了以下两项扩展机制：
+
+\paragraph{双概率自适应交叉与变异算子（\code{wide\_adaptXY}）。} 标准遗传算法采用固定交叉率 $p_c$ 与变异率 $p_m$，在进化后期易陷入早熟收敛或随机游走。我们构建了 $2\times 2$ 正交自适应开关配置 \code{wide\_adapt}$XY$（其中 $X \in \{0,1\}$ 控制变异率自适应，$Y \in \{0,1\}$ 控制交叉率自适应，基准值设为 $p_m = 0.7, p_c = 0.9$）：当种群代际最优适应度连续停滞或多样性下降时动态上调 $p_m$（上限截断为 $0.95$），并根据个体适应度相对种群均值的分布调节 $p_c$。通过代际轨迹追踪，我们在实验中定量揭示了变异自适应在高维离散排程空间中高达 $86\%$ 以上的代数触及 $0.95$ 上限的饱和现象，为固定算子参数与单开交叉自适应（\code{wide\_adapt01}）的取舍提供了精细机理依据。
+
+\paragraph{基于 Double DQN 的元调度策略切换（\code{dqn-experiment-v2}）。} 考虑到真实订单流在平峰期与波峰期具有截然不同的组合复杂度，我们构建了基于 Double DQN~\cite{vanhasselt2016ddqn} 的双动作元调度器（\code{dqn\_agent.py} 与 \code{dqn\_policy.py}）：
+\begin{itemize}
+  \item \textbf{状态表征与动作空间}：在每个派单决策时刻提取当前待派订单积压量、在途车辆剩余负载分布、巷道预约密度及时间窗口进度构成状态特征向量 $s_t$；动作空间定义为二元高层算子选择 $a_t \in \{a_{\text{Hung}}, a_{\text{AdaGA}}\}$，其中 $a_{\text{Hung}}$ 调用基于局部 $F$ 代理代价矩阵的匈牙利指派（\code{hungarian\_learning.py}），$a_{\text{AdaGA}}$ 调用双概率自适应联合遗传算法。
+  \item \textbf{双网络解耦更新与奖励设计}：采用在线评估网络 $Q_\theta$ 选取动作 $a^\star = \arg\max_a Q_\theta(s_{t+1}, a)$、目标网络 $Q_{\theta^-}$ 计算 TD 目标值以抑制过估计偏差，单步奖励与综合线性目标 $F_{\text{WEPA}}$ 的边际增量对齐。该分支完整保存了最佳网络权重（\code{best.npz}）与跨日期独立评测流水线。
+\end{itemize}
+
+\subsection{零依赖工程架构、服务边界解耦与本地 Web 可视化系统}
+
+在工程实现层面，我们在 \code{src/agv/}（v0.6.0）中完成了系统的模块化重构与性能加固：
+\begin{enumerate}
+  \item \textbf{应用服务层与接口边界解耦}：通过 \code{src/agv/api.py} 统一封装算例工厂、算法/场景兼容性校验与单次/批量执行服务，使命令行终端（\code{cli.py}，按职责拆分为独立命令处理器）与 HTTP 服务共享同一套强类型应用接口。
+  \item \textbf{热路径内存与性能优化}：对仿真观测中的静态地图几何采用不可变对象复用，将单次 \code{observe()} 拷贝耗时压缩约 40\%；对 LNS 候选轨迹采用写时复制结构，配合网格索引化的待命车辆冲突查询，使待命维持阶段的冲突检查达到 $O(1)$ 更新复杂度。
+  \item \textbf{本地交互式 Web 可视化平台（\code{agv serve}）}：仅使用标准库 \code{http.server} 构建绑定于 \code{127.0.0.1} 的安全本地服务（内置请求体限流与并发重仿真 429 保护），前端支持在浏览器中实时切换 Legacy / V4 / V9 / V9.1 仓库布局与全部注册算法，逐帧回放 AGV 取货、层序解锁、避碰等待与返库全过程。
+\end{enumerate}

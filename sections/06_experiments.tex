@@ -1,20 +1,386 @@
 % ============================================================================
-% 第 6 章 实验设计与结果分析（待与队友商议合写）
+% 第 6 章 实验设计与结果分析
 % ============================================================================
 \section{实验设计与结果分析}
 \label{sec:experiments}
 
-\begin{planbox}{第 6 章写作规划（供双人分工确认）}
-  本章将全面呈现 561 次独立验解运行的定量结果与可视化图表（原始数据与高清图片均已冻结归档于代码仓库 \code{results/} 目录，后续可直接转入本仓库 \code{figures/} 引用）：
+为全面检验本文所提出调度系统在真实工业订单流与多工况立体仓库场景下的求解质量、随机种子稳定性、计算效率及超参数敏感性，我们构建了严格的实验验证体系。本章首先说明整体实验协议与独立物理验解保障（6.1 节）；针对主线 B 早期阶段诊断与微型 CP-SAT 精确参照对比（6.2 节，对应队友负责模块）预留结构化位置；随后详尽展示并深入分析主线 B 跨窗口多随机种子稳定性、预算/自适应敏感性及跨窗泛化复评（6.3 节，共 356 次运行 + Double DQN 对照）以及主线 A 多工况 5-seed 演进、V4 BCRD 与 V9.1 大规模留出评估（6.4 节，205 次敏感性运行 + 逾 2,300 次留出测试）。
+
+\subsection{实验体系总览与独立物理验解协议}
+
+全项目实验遵循\textbf{“开发集探索选型、验证/留出集冻结复评、全轨迹独立物理验解”}的实证准则：
+
+\begin{itemize}
+  \item \textbf{测试环境与复现机制}：所有实验均在 macOS ARM64（Python 3.12 标准库环境）下执行。仓库提供一键验证脚本（\code{verify.py}、\code{verify\_sensitivity\_evidence.py}、\code{verify\_bcrd.py} 与 \code{verify\_v91.py}），对源码 SHA-256 指纹、协议配置及输出轨迹进行自动化核验。
+  \item \textbf{三大核心敏感性实验套件（561 次运行 100\% 通过独立验解）}：
   \begin{enumerate}
-    \item \textbf{6.1 实验设置与复现协议}：说明硬件环境、软件零依赖复现命令、开发窗与既有验证窗的窗口划分、随机种子配置（WEPA seed 0--2 / Core 5 seeds）及 100\% 独立物理验解通过情况。
-    \item \textbf{6.2 主线 B 核心对照实验（WEPA 开发窗与既有验证窗）}：
-    \begin{itemize}
-      \item 展示 \code{fcfs}、\code{eta}、\code{hungarian}、\code{simple}、\code{wide}、\code{gate} 与 \code{hga} 在 4 个开发窗（200 次运行）及 4 个既有验证窗（156 次运行）上的 $T, R, D, F$ 与配对胜平负统计表；
-      \item 结合多 seed 分布箱线图与窗级配对对比图，论证 \code{gate} 相对规则/匹配基线的稳定优势（+5.45\% / +2.43\% / +3.87\%）以及相对 \code{wide} 削减 63\% GA 触发次数的效率收益；
-      \item 分析 \code{hga} 与 \code{wide\_adapt01} 在开发窗领先但验证窗回退的跨窗泛化现象，以及微型两车 CP-SAT 精确参照的误差检验。
-    \end{itemize}
-    \item \textbf{6.3 超参数敏感性与算力—质量权衡分析}：结合 2$\times$2 预算扫描（\code{gate\_preview3} / \code{gate\_gen8} / \code{gate\_gen24}）与 2$\times$2 自适应算子扫描（\code{wide\_adapt00..11}），展示 CPU 耗时与 $F$ 值的帕累托权衡曲线，并简述历史 \code{Double DQN} 分支对照结果。
-    \item \textbf{6.4 主线 A 多工况演进与参数扫描（Legacy / V4 / V9.1）}：汇总 205 次 5-seed 实验结果，对比 \code{bcrd\_budget}（V4 动态 +3.01\%）、\code{sipp\_batch}（Legacy 静态 $R$ 改善 +2.62\%）、\code{sipp\_stream\_bcrd}（V9.1 静态 +1.53\%）以及 \code{max\_batches} 与 \code{trial\_budget} 敏感性曲线，并附本地 Web 可视化仿真关键帧截图。
+    \item \emph{WEPA 开发窗多 Seed 与超参敏感性套件}（\code{wepa-dev-sensitivity-20261120}）：在 4 个开发窗口（\code{day12/32/33/45}，共 201 条真实订单）上执行 15 组方案与参数配置，共计 \textbf{200/200} 次有效运行；
+    \item \emph{WEPA 既有验证窗跨窗口泛化复评套件}（\code{wepa-val-sensitivity-20261121}）：在 4 个独立既有验证窗口（\code{day40/61/83/87}，共 199 条真实订单）上对 14 组关键方案与组合配置开展多 seed 回顾性复评，共计 \textbf{156/156} 次有效运行；
+    \item \emph{自研通用引擎多工况 5-Seed 演进与参数扫描套件}（\code{core-sensitivity-20261121}）：覆盖 Legacy 静态/动态、V4 分层动态、V9.1 混合静态/动态及 \code{trial\_budget}、重规划间隔、\code{max\_batches} 超参扫描共 41 组配置 $\times$ 5 随机种子 = \textbf{205/205} 次有效运行。
   \end{enumerate}
-\end{planbox}
+  \item \textbf{配对统计口径}：所有跨方案比较均在同一窗口/算例、同一随机种子下严格配对计算相对改善率 $\Delta F = 100\% \times (1 - F_{\text{cand}}/F_{\text{base}})$，先取窗口内多 seed 均值，再按来源日期等权平均，并辅以 4,000 次重抽样的 Bootstrap 95\% 置信区间与胜/平/负（Win/Tie/Loss）计数。
+\end{itemize}
+
+\subsection{主线 B 早期阶段诊断与微型精确参照对比实验}
+
+\begin{teammatebox}{6.2 节留白 —— 对应队友 \code{Betty-dey} 提交（\code{ef73cd5}, \code{ed2bd0a} \code{research/recommended-20261024/}）}
+  本小节由队友补充撰写，对应主线 B 在 2026-10-22 至 10-24 期间完成的阶段性选型与精确参照实验（详见代码仓库 \code{docs/工作与实验总览.md} 及 \code{current/evidence/docs/结果报告.md}），建议涵盖：
+  \begin{enumerate}
+    \item \textbf{微型两车静态算例的 OR-Tools CP-SAT 精确参照实验}：6 个缩减两车实例（5 个 \code{OPTIMAL} 最优证书 + 1 个 \code{FEASIBLE}）上 \code{gate}、\code{hga} 与滚动 \code{hungarian} 的最优解命中率（4/4 vs 2/4）对比；
+    \item \textbf{阶段诊断消融对照}：10 月 22 日 GA/ACO/PSO 路径混合探索结论，以及开放流终点预测（$-0.927\%$）、瓶颈邻域与双车优先级/延迟耦合重排（\code{coupled}）、同时换车＋重排复合邻域（\code{compound}）在开发集与验证集上的配对表现及取舍依据。
+  \end{enumerate}
+\end{teammatebox}
+
+\subsection{主线 B 多随机种子稳定性、超参数敏感性与跨窗口泛化复评}
+
+本节系统呈现主线 B 在 4 个开发窗口（200 次运行）与 4 个既有验证窗口（156 次运行）上的完整定量结果，从演进收益、多 seed 搜索稳定性、预算与自适应算子分解、跨窗口过拟合诊断以及 Double DQN 元调度对照五个维度展开深入分析。
+
+\subsubsection{开发窗口（200 次运行）核心演进与配对效应分析}
+
+表~\ref{tab:wepa-dev-summary} 与表~\ref{tab:wepa-dev-paired} 分别汇总了 15 组方案在 4 个开发窗口（\code{day12-bin1164}、\code{day32-bin3083}、\code{day33-bin3172}、\code{day45-bin4335}）上的日期等权指标均值与严格配对改善率；图~\ref{fig:wepa-dev-core} 与图~\ref{fig:wepa-dev-paired-stability} 展示了对应的指标分布与种子稳定性。
+
+\begin{table}[htbp]
+  \centering
+  \caption{WEPA 开发窗口（4 日期，200 次运行）各调度方案与超参配置综合性能汇总}
+  \label{tab:wepa-dev-summary}
+  \renewcommand{\arraystretch}{1.15}
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{l l c c c c c c c}
+    \toprule
+    \bfseries 组别 & \bfseries 方案标识 & \bfseries 有效运行 & \bfseries 综合 $F$ $\downarrow$ & \bfseries 日期内 Seed SD & \bfseries $T$ 完工 (s) & \bfseries $R$ 响应 (s) & \bfseries $D$ 总里程 (格) & \bfseries CPU (s) \\
+    \midrule
+    \multirow{7}{*}{演进主线}
+      & \code{fcfs}       & 8/8   & 0.9589 & 0.0000 & 1273.50 & 259.07 & 4457.0 & 0.46 \\
+      & \code{eta}        & 8/8   & 0.9424 & 0.0000 & 1270.75 & 226.48 & 4346.0 & 0.48 \\
+      & \code{hungarian}  & 8/8   & 0.9264 & 0.0000 & 1246.25 & 224.45 & 4298.0 & 0.48 \\
+      & \code{simple}     & 20/20 & 0.9307 & 0.0097 & 1252.30 & 227.48 & 4297.0 & 7.96 \\
+      & \code{wide}       & 20/20 & 0.9205 & 0.0138 & 1233.00 & 228.29 & 4303.5 & 14.69 \\
+      & \textbf{\code{gate}} & \textbf{20/20} & \textbf{0.9198} & \textbf{0.0138} & \textbf{1231.75} & \textbf{228.21} & \textbf{4303.5} & \textbf{14.20} \\
+      & \code{hga}        & 20/20 & 0.9101 & 0.0035 & 1218.50 & 224.26 & 4275.8 & 12.97 \\
+    \midrule
+    \multirow{4}{*}{预算扫描}
+      & \code{gate\_proxy96}         & 12/12 & 0.9248 & 0.0116 & 1240.92 & 227.69 & 4307.8 & 14.35 \\
+      & \code{gate\_preview3}        & 12/12 & 0.9241 & 0.0122 & 1238.25 & 228.39 & 4320.5 & 7.65 \\
+      & \code{gate\_proxy96\_preview3} & 12/12 & 0.9239 & 0.0111 & 1239.08 & 227.53 & 4311.5 & 7.66 \\
+      & \code{gate\_gen8}            & 12/12 & 0.9276 & 0.0112 & 1247.00 & 227.13 & 4296.8 & 14.02 \\
+    \midrule
+    \multirow{4}{*}{自适应算子}
+      & \code{wide\_adapt00} ($p_m,p_c$ 均关) & 12/12 & 0.9238 & 0.0077 & 1239.75 & 227.74 & 4295.8 & 14.87 \\
+      & \code{wide\_adapt10} (仅开 $p_m$)     & 12/12 & 0.9236 & 0.0075 & 1240.17 & 227.38 & 4289.0 & 15.06 \\
+      & \code{wide\_adapt01} (仅开 $p_c$)     & 12/12 & 0.9145 & 0.0135 & 1226.00 & 226.45 & 4262.2 & 14.24 \\
+      & \code{wide\_adapt11} ($p_m,p_c$ 均开) & 12/12 & 0.9217 & 0.0085 & 1235.83 & 228.38 & 4292.2 & 14.65 \\
+    \bottomrule
+  \end{tabular}%
+  }
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \caption{WEPA 开发窗口同窗口、同随机种子固定配对改善率及搜索预算触发统计}
+  \label{tab:wepa-dev-paired}
+  \renewcommand{\arraystretch}{1.15}
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{l c c c c c c c}
+    \toprule
+    \bfseries 配对比较（候选 vs 基线） & \bfseries 共同 Seed & \bfseries 配对数 & \bfseries 平均 $\Delta F$ & \bfseries 日期 Bootstrap 95\% 区间 & \bfseries 胜/平/负 & \bfseries 候选 GA 触发 & \bfseries 完整 SIPP 预演 \\
+    \midrule
+    \code{wide} vs \code{simple}               & 0--4 & 20/20 & +0.99\% & [+0.15\%, +1.83\%] & 3/1/0 & 560 & 3360 \\
+    \textbf{\code{gate} vs \code{wide}}        & \textbf{0--4} & \textbf{20/20} & \textbf{+0.11\%} & \textbf{[+0.00\%, +0.33\%]} & \textbf{1/3/0} & \textbf{205 ($-63\%$)} & \textbf{1230 ($-63\%$)} \\
+    \code{gate} vs \code{eta}                  & 0--1 & 8/8   & +2.75\% & [+0.25\%, +5.67\%] & 3/0/1 & 205 & 1230 \\
+    \code{gate} vs \code{fcfs}                 & 0--1 & 8/8   & +4.30\% & [+0.02\%, +9.98\%] & 3/0/1 & 205 & 1230 \\
+    \code{hungarian} vs \code{gate}            & 0--1 & 8/8   & $-1.29\%$ & [$-1.99\%$, $-0.40\%$] & 0/1/3 & 0 & 0 \\
+    \code{hga} vs \code{gate}                  & 0--4 & 20/20 & +0.95\% & [$-0.30\%$, +2.27\%] & 2/1/1 & 189 & 1134 \\
+    \midrule
+    \code{gate\_preview3} vs \code{gate}       & 0--2 & 12/12 & $-0.68\%$ & [$-1.37\%$, +0.00\%] & 0/2/2 & 124 & 372 \\
+    \code{gate\_proxy96} vs \code{gate}        & 0--2 & 12/12 & $-0.77\%$ & [$-1.92\%$, +0.38\%] & 1/1/2 & 123 & 738 \\
+    \code{gate\_gen8} vs \code{gate}           & 0--2 & 12/12 & $-1.04\%$ & [$-2.46\%$, +0.38\%] & 1/1/2 & 121 & 726 \\
+    \code{wide\_adapt01} vs \code{wide\_adapt00} & 0--2 & 12/12 & +0.94\% & [+0.12\%, +2.23\%] & 3/1/0 & 332 & 1991 \\
+    \code{wide\_adapt10} vs \code{wide\_adapt00} & 0--2 & 12/12 & +0.05\% & [$-1.08\%$, +1.54\%] & 2/0/2 & 336 & 2016 \\
+    \code{wide\_adapt11} vs \code{wide\_adapt00} & 0--2 & 12/12 & +0.23\% & [$-0.42\%$, +1.23\%] & 2/0/2 & 335 & 2010 \\
+    \bottomrule
+  \end{tabular}%
+  }
+\end{table}
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=0.86\textwidth]{figures/core_metrics.png}
+  \caption{WEPA 开发窗口各演进方案与参数变体的核心指标（$F, T, R, D$）及计算耗时对比}
+  \label{fig:wepa-dev-core}
+\end{figure}
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/paired_effects.png}
+    \caption{逐方案配对改善率与 Bootstrap 95\% 置信区间}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/seed_stability.png}
+    \caption{不同随机种子下的 $F$ 值分布与组内稳定性}
+  \end{subfigure}
+  \caption{WEPA 开发窗口配对改善效应与多随机种子搜索稳定性分析}
+  \label{fig:wepa-dev-paired-stability}
+\end{figure}
+
+从开发窗口数据可以得出三项关键观察：
+\begin{enumerate}
+  \item \textbf{事件门控（\code{gate}）实现无损降耗}：从 \code{simple} 扩展搜索预算至 \code{wide} 使综合目标 $F$ 改善 $+0.99\%$（3 胜 1 平 0 负）；在此基础上引入低负载事件门控后，\code{gate} 的平均 $F$ 进一步微降至 $0.9198$（配对 $+0.11\%$，1 胜 3 平 0 负），同时将 20 次运行中的累计 GA 触发次数从 \textbf{560 次大幅削减至 205 次（降幅达 63\%）}，完整 SIPP 预演调用数同步从 3,360 次降至 1,230 次，验证了低负载区间直接采用精确位掩码分支无需启动进化搜索的设计假设。
+  \item \textbf{预算与自适应算子的正交分解机理}：如图~\ref{fig:wepa-dev-2x2} 所示，在 $2\times 2$ 预算扫描中，将 Top-$K$ 完整 SIPP 预演数降至 3 次（\code{gate\_preview3}）可将单次平均 CPU 耗时从 $14.20\,\text{s}$ 压缩至 $7.65\,\text{s}$（\textbf{降幅 46.1\%}），而 $F$ 仅轻微上升 $0.68\%$；反之，将进化代数减半至 8 代（\code{gate\_gen8}）不仅使 $F$ 退化 $1.04\%$，且因频繁重触发导致总 CPU 耗时几乎未降（$14.02\,\text{s}$）。在 $2\times 2$ 自适应算子分解中，仅开启交叉率自适应（\code{wide\_adapt01}）在开发窗取得 $+0.94\%$ 改善，而开启变异率自适应的两组（\code{wide\_adapt10} 与 \code{wide\_adapt11}）改善微弱（$+0.05\%$ 与 $+0.23\%$）。深入核查进化代际日志发现：\code{wide\_adapt10} 在 $4,639 / 5,376$ 代（\textbf{86.29\%}）、\code{wide\_adapt11} 在 $4,640 / 5,360$ 代（\textbf{86.57\%}）中变异率 $p_m$ 持续触及上限 $0.95$，导致进化后期退化为高频随机扰动，破坏了优良基因片段的稳定遗传。
+  \item \textbf{多目标权重重评分稳健性}：如图~\ref{fig:wepa-dev-pareto-weight} 所示，在不重新寻优的前提下对同一批已执行轨迹按默认（$0.5/0.3/0.2$）、偏完工（$0.6/0.2/0.2$）、偏响应（$0.4/0.4/0.2$）与偏里程（$0.4/0.2/0.4$）四组权重重新加权评分，前 5 名方案梯队始终保持不变（\code{hga}、\code{gate}、\code{wide}、\code{wide\_adapt01} 与 \code{wide\_adapt00}），说明联合 GA + SIPP 架构的收益并非依赖单一权重配比。
+\end{enumerate}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/budget_2x2.png}
+    \caption{计算预算 $2\times 2$ 正交分解（代理上限 vs 预演数）}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/adaptive_2x2.png}
+    \caption{自适应算子 $2\times 2$ 正交分解（变异 vs 交叉开关）}
+  \end{subfigure}
+  \caption{WEPA 开发窗口计算预算与自适应进化算子 $2\times 2$ 因子分解实验结果}
+  \label{fig:wepa-dev-2x2}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/pareto.png}
+    \caption{计算耗时（CPU）与综合评分 $F$ 的帕累托前沿}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/weight_rescore.png}
+    \caption{四组不同 $T/R/D$ 权重配比下的方案排序一致性}
+  \end{subfigure}
+  \caption{WEPA 开发窗口算力—质量帕累托权衡曲线与多目标权重敏感性重评结果}
+  \label{fig:wepa-dev-pareto-weight}
+\end{figure}
+
+\subsubsection{既有验证窗口（156 次运行）跨窗口泛化复评与最终选型论证}
+
+开发窗口中 \code{hga}（$+0.95\%$）与 \code{wide\_adapt01}（$+0.94\%$）表现突出。为严格检验这些改进是否具备跨订单流分布的泛化能力，我们在 4 个独立既有验证窗口（\code{day40-bin3885}、\code{day61-bin5902}、\code{day83-bin7983}、\code{day87-bin8393}，共 156 次运行）上开展了多 seed 复评，并新增扩大代数（\code{gate\_gen24}）与组合配置（\code{hga\_adapt01}）。结果汇总于表~\ref{tab:wepa-val-summary} 与图~\ref{fig:wepa-val-charts}。
+
+\begin{table}[htbp]
+  \centering
+  \caption{WEPA 既有验证窗口（4 日期，156 次运行）多 Seed 复评指标汇总与同窗口配对改善率}
+  \label{tab:wepa-val-summary}
+  \renewcommand{\arraystretch}{1.15}
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{l c c c c c c c c c}
+    \toprule
+    \bfseries 方案标识 & \bfseries 运行数 & \bfseries 综合 $F$ $\downarrow$ & \bfseries Seed SD & \bfseries $T$ (s) & \bfseries $R$ (s) & \bfseries $D$ (格) & \bfseries CPU (s) & \bfseries 相对 \code{gate} 配对 $\Delta F$ & \bfseries 胜/平/负 \\
+    \midrule
+    \code{fcfs}           & 8  & 0.9464 & 0.0000 & 1188.00 & 331.01 & 4755.0 & 0.65  & $-5.45\%$ (\code{gate} $+5.45\%$) & 0/0/4 \\
+    \code{eta}            & 8  & 0.9186 & 0.0000 & 1173.00 & 288.22 & 4614.0 & 0.57  & $-2.43\%$ (\code{gate} $+2.43\%$) & 0/0/4 \\
+    \code{hungarian}      & 8  & 0.9293 & 0.0000 & 1190.00 & 289.33 & 4637.5 & 0.62  & $-3.87\%$ (\code{gate} $+3.87\%$) & 0/0/4 \\
+    \code{simple}         & 12 & 0.9068 & 0.0113 & 1151.50 & 290.95 & 4593.7 & 10.42 & $-0.86\%$ (\code{wide} $+0.96\%$) & 0/0/4 \\
+    \code{wide}           & 12 & 0.8983 & 0.0135 & 1134.33 & 292.70 & 4605.8 & 20.52 & $+0.10\%$ (\code{gate} $-0.10\%$) & 2/2/0 \\
+    \textbf{\code{gate}}  & \textbf{12} & \textbf{0.8992} & \textbf{0.0121} & \textbf{1136.42} & \textbf{292.17} & \textbf{4601.5} & \textbf{21.66} & \textbf{基准 ($0.00\%$)} & \textbf{---} \\
+    \code{hga}            & 12 & 0.9086 & 0.0106 & 1151.75 & 292.94 & 4619.7 & 21.60 & $-1.12\%$ [$-2.02\%$, $-0.54\%$] & 0/0/4 \\
+    \midrule
+    \code{gate\_preview3} & 12 & 0.9019 & 0.0123 & 1141.67 & 291.80 & 4601.3 & 12.09 ($-44\%$) & $-0.33\%$ [$-0.66\%$, $+0.00\%$] & 0/2/2 \\
+    \code{gate\_gen8}     & 12 & 0.9021 & 0.0065 & 1140.92 & 291.91 & 4614.5 & 23.80 & $-0.35\%$ [$-0.88\%$, $+0.23\%$] & 1/0/3 \\
+    \code{gate\_gen24}    & 12 & 0.9115 & 0.0153 & 1156.50 & 293.98 & 4618.0 & 23.04 & $-1.41\%$ [$-2.65\%$, $-0.41\%$] & 0/0/4 \\
+    \midrule
+    \code{wide\_adapt00}  & 12 & 0.9041 & 0.0119 & 1144.33 & 291.23 & 4623.8 & 24.05 & 基准 (\code{adapt} 组内) & --- \\
+    \code{wide\_adapt01}  & 12 & 0.9087 & 0.0144 & 1152.58 & 291.95 & 4619.0 & 23.02 & $-0.54\%$ (vs \code{adapt00}) & 1/0/3 \\
+    \code{wide\_adapt11}  & 12 & 0.9030 & 0.0091 & 1141.67 & 292.83 & 4619.5 & 22.24 & $+0.11\%$ (vs \code{adapt00}) & 2/0/2 \\
+    \code{hga\_adapt01}   & 12 & 0.9013 & 0.0052 & 1140.83 & 291.98 & 4593.8 & 22.40 & $-0.28\%$ (vs \code{gate}；vs \code{hga} $+0.79\%$) & 2/0/2 \\
+    \bottomrule
+  \end{tabular}%
+  }
+\end{table}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/validation_evolution.png}
+    \caption{既有验证窗口 7 种演进方案综合评分 $F$ 对比}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/validation_budget_and_adaptive.png}
+    \caption{既有验证窗口预算扩展、自适应与组合方案复评}
+  \end{subfigure}
+  \caption{WEPA 既有验证窗口（156 次运行）跨窗口泛化复评结果}
+  \label{fig:wepa-val-charts}
+\end{figure}
+
+验证集复评揭示了至关重要的\textbf{跨窗口泛化规律}，直接支撑了本项目的最终方案决策：
+\begin{itemize}
+  \item \textbf{\code{gate} 相对全部规则与局部匹配基线实现 4/0/0 跨窗口全胜}：在 4 个验证窗口上，\code{gate}（seed 0--2 均值为 $F=0.8992$，其中单 seed 0 均值为 $0.8964$，与 2026-10 历史冻结记录完全吻合）相对 \code{fcfs}、\code{eta} 与 \code{hungarian} 分别取得 \textbf{+5.45\%}、\textbf{+2.43\%} 与 \textbf{+3.87\%} 的配对改善，且在全部 4 个来源日期上均为正收益（4 胜 0 平 0 负）。
+  \item \textbf{局部先验注入与过度搜索的跨窗回退诊断}：在开发窗领先的 \code{hga}（匈牙利种子注入）与 \code{wide\_adapt01}（单开交叉自适应）在验证窗上分别回退 $-1.12\%$（0/0/4）与 $-0.54\%$（1/0/3）；尽管将两者结合的 \code{hga\_adapt01} 将 seed 标准差降至全场最低（$0.0052$）并较纯 \code{hga} 改善 $+0.79\%$，但整体仍略逊于 \code{gate}（$-0.28\%$）。同理，将进化代数从 16 增至 24 代（\code{gate\_gen24}）在全部 4 个验证窗口上均劣化（平均 $-1.41\%$，0/0/4）。其根本原因在于：在线滚动调度每步仅观测当前局部已发布订单，向初始种群强行注入短视匈牙利解或过度加深静态进化代数，会使搜索过度迎合当前截断窗口而牺牲对后续新到达订单的态势适应性。因此，保持随机多样化种群与适度 16 代预算的 \textbf{\code{gate}} 才是跨窗口最稳健的默认方案。
+  \item \textbf{\code{gate\_preview3} 的跨窗口高性价比验证}：在验证窗上，\code{gate\_preview3} 同样将平均 CPU 耗时由 $21.66\,\text{s}$ 降至 $12.09\,\text{s}$（\textbf{削减 44.2\%}），而综合目标 $F$ 仅相差 $-0.33\%$（4 个窗口中 2 平 2 略差），证实其作为算力受限环境下轻量推荐档的可靠性。
+\end{itemize}
+
+\subsubsection{Double DQN 元调度切换分支评测分析}
+
+在独立归档分支 \code{research/dqn-experiment-v2/} 中，我们在 5 个未参与训练的测试日窗口上对最佳检查点（\code{best.npz}）进行了固定配对评估。实测数据显示：Double DQN 动态切换策略相对纯局部匈牙利指派平均改善 \textbf{+1.12\%}，相对原精准匹配策略平均改善 \textbf{+0.96\%}，证明神经网络能够有效识别高拥堵积压态势并调用遗传搜索化解瓶颈；但与全程启用双概率自适应联合 GA 相比，其综合评分略低 $-0.37\%$。鉴于事件门控 \code{gate} 已通过零训练成本的确定性规则实现了更优的低负载分流与跨窗口稳健性，我们将 Double DQN 分支作为深度强化学习与进化计算结合的探索性成果归档保留。
+
+\subsection{主线 A 多工况演进、BCRD/V9.1 留出评估与超参数扫描}
+
+面向自研通用调度引擎 \code{src/agv/}（主线 A），我们完成了涵盖 205 次运行的 5-seed 全工况演进与超参扫描（\code{core-sensitivity-20261121}），并结合 V4 BCRD（1,400 次累计运行）与 V9.1（960 次未见种子留出运行）的冻结实验进行综合论证。
+
+\subsubsection{Legacy / V4 / V9.1 五随机种子演进与超参数扫描（205 次运行）}
+
+表~\ref{tab:core-sensitivity-summary} 汇总了主线 A 在五类代表性工况与参数扫描下的 5-seed（\code{seed 0..4}）配对实验结果；图~\ref{fig:core-legacy-charts} 与图~\ref{fig:core-v91-charts} 展示了各场景下的流程时间、归一化 $F$ 及超参数响应曲线。
+
+\begin{table}[htbp]
+  \centering
+  \caption{主线 A 自研通用引擎（\code{src/agv/}，205 次运行）5-Seed 演进对比与超参数扫描汇总}
+  \label{tab:core-sensitivity-summary}
+  \renewcommand{\arraystretch}{1.15}
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{l l c c c c c c c}
+    \toprule
+    \bfseries 实验场景 / 扫描组 & \bfseries 算法 / 参数配置 & \bfseries 可行率 & \bfseries $R$ 流程 ($\pm$SD) & \bfseries $T$ 完工 ($\pm$SD) & \bfseries $D$ 步数 & \bfseries 归一化 $F$ ($\pm$SD) & \bfseries 配对改善 & \bfseries CPU (s) \\
+    \midrule
+    \multirow{5}{*}{Legacy 静态演进}
+      & \code{baseline} (A*)     & 5/5 & 50.82 ($\pm$4.37) & 114.60 ($\pm$7.30)  & 622.8 & --- & 基准 & 0.08 \\
+      & \code{joint\_only}       & 5/5 & 49.88 ($\pm$4.18) & 112.00 ($\pm$13.32) & 614.4 & --- & $R$ +1.84\% (5/0/0) & 2.19 \\
+      & \code{joint\_batch}      & 5/5 & 49.49 ($\pm$4.52) & 111.20 ($\pm$14.17) & 614.0 & --- & $R$ +2.64\% (5/0/0) & 14.15 \\
+      & \code{sipp\_budget}      & 5/5 & 49.81 ($\pm$4.13) & 109.20 ($\pm$9.31)  & 607.2 & --- & $R$ +1.96\% (5/0/0) & 0.98 \\
+      & \textbf{\code{sipp\_batch}} & \textbf{5/5} & \textbf{49.49 ($\pm$4.40)} & \textbf{109.40 ($\pm$10.90)} & \textbf{596.4} & \textbf{---} & \textbf{$R$ +2.63\% (5/0/0)} & \textbf{10.27} \\
+    \midrule
+    \multirow{4}{*}{Legacy 动态演进}
+      & \code{baseline} (A*)     & 5/5 & 28.84 ($\pm$3.52) & 139.80 ($\pm$8.41)  & 754.8 & --- & 基准 & 0.09 \\
+      & \code{sipp\_conflict}    & 5/5 & 27.81 ($\pm$3.02) & 139.00 ($\pm$9.41)  & 752.8 & --- & $R$ +3.44\% (5/0/0) & 1.57 \\
+      & \code{sipp\_budget}      & 5/5 & 27.82 ($\pm$3.04) & 139.00 ($\pm$9.41)  & 753.2 & --- & $R$ +3.39\% (5/0/0) & 0.98 \\
+      & \code{sipp\_learned}     & 5/5 & 27.84 ($\pm$3.05) & 140.00 ($\pm$10.70) & 762.0 & --- & $R$ +3.33\% (5/0/0) & 0.74 \\
+    \midrule
+    \multirow{3}{*}{Legacy 预算/间隔}
+      & \code{trial\_budget=2} (\code{b2}) & 5/5 & 27.86 ($\pm$3.06) & 138.60 ($\pm$8.68) & 764.8 & --- & 耗时最低 & 0.28 \\
+      & \code{trial\_budget=6} (\code{b6}) & 5/5 & 27.82 ($\pm$3.04) & 139.00 ($\pm$9.41) & 753.2 & --- & 默认均衡档 & 0.45 \\
+      & \code{interval=10} (\code{int10})  & 5/5 & 27.76 ($\pm$2.98) & 138.80 ($\pm$9.36) & 752.8 & --- & 间隔 2/5/10 质量一致 & 0.40 \\
+    \midrule
+    \multirow{4}{*}{V4 分层动态演进}
+      & \code{baseline}          & 5/5 & 41.87 ($\pm$3.49) & 139.60 ($\pm$7.89)  & 684.8 & 1.0000 ($\pm$0.0000) & 基准 & 0.11 \\
+      & \code{sipp\_budget}      & 5/5 & 41.62 ($\pm$3.29) & 138.60 ($\pm$6.77)  & 684.4 & 0.9948 ($\pm$0.0066) & $F$ +0.52\% (3/2/0) & 0.47 \\
+      & \code{sipp\_matching}    & 5/5 & 41.19 ($\pm$3.31) & 139.60 ($\pm$5.37)  & 698.8 & 0.9999 ($\pm$0.0252) & $F$ +0.01\% (3/0/2) & 0.51 \\
+      & \textbf{\code{bcrd\_budget}} & \textbf{5/5} & \textbf{41.37 ($\pm$2.87)} & \textbf{132.80 ($\pm$10.94)} & \textbf{675.6} & \textbf{0.9699 ($\pm$0.0191)} & \textbf{$F$ +3.01\% (4/1/0)} & \textbf{0.17} \\
+    \midrule
+    \multirow{4}{*}{V9.1 静态与批上限}
+      & \code{baseline}          & 5/5 & 154.05 ($\pm$8.25) & 329.20 ($\pm$18.94) & 1210.0 & 1.0000 ($\pm$0.0000) & 基准 & 0.64 \\
+      & \code{sipp\_stream\_matching} & 5/5 & 152.46 ($\pm$8.51) & 321.40 ($\pm$15.76) & 1205.2 & 0.9845 ($\pm$0.0178) & $F$ +1.55\% (5/0/0) & 0.87 \\
+      & \textbf{\code{sipp\_stream\_bcrd} (\code{m2})} & \textbf{5/5} & \textbf{152.51 ($\pm$8.46)} & \textbf{321.40 ($\pm$15.76)} & \textbf{1205.6} & \textbf{0.9847 ($\pm$0.0180)} & \textbf{$F$ +1.53\% (4/1/0)} & \textbf{1.20} \\
+      & \code{v91\_bcrd\_m1} (\code{max\_batches=1}) & 5/5 & 154.05 ($\pm$8.25) & 329.20 ($\pm$18.94) & 1207.2 & 0.9995 ($\pm$0.0004) & $F$ +0.05\% & 2.27 \\
+    \bottomrule
+  \end{tabular}%
+  }
+\end{table}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/legacy_static_flow.png}
+    \caption{Legacy 静态并发场景平均流程时间 $R$ 演进对比}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/legacy_dynamic_flow.png}
+    \caption{Legacy 动态到达场景平均流程时间 $R$ 演进对比}
+  \end{subfigure}
+  \caption{主线 A Legacy 静态与动态场景 5-Seed 演进实验结果}
+  \label{fig:core-legacy-charts}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/legacy_hyperparam_sensitivity.png}
+    \caption{Legacy 动态 \code{trial\_budget} 与重规划间隔敏感性}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/v91_evolution_and_bcrd_batches.png}
+    \caption{V9.1 演进对比及 BCRD \code{max\_batches} 参数扫描}
+  \end{subfigure}
+  \caption{主线 A 超参数敏感性扫描（候选尝试预算、重规划间隔与 BCRD 批次上限）}
+  \label{fig:core-v91-charts}
+\end{figure}
+
+实验结果表明：
+\begin{enumerate}
+  \item 在 \textbf{V4 分层动态场景}下，\code{bcrd\_budget} 相对 \code{baseline} 将归一化目标 $F$ 显著降低 \textbf{3.01\%}（$0.9699 \pm 0.0191$，4 胜 1 平 0 负），平均完工时间 $T$ 从 $139.60$ 步缩短至 $132.80$ 步，单次求解仅需 $0.17\,\text{s}$；而未配备前瞻试派的 \code{sipp\_budget}（$+0.52\%$）与 \code{sipp\_matching}（$+0.01\%$）提升有限，凸显了多层层序锁定下反事实批次前瞻的必要性。
+  \item 在 \textbf{Legacy 静态与动态场景}下，静态首轮批滚动 \code{sipp\_batch} 在全部 5 个种子上均优于基线（平均流程时间 $R$ 改善 $+2.63\%$，总移动步数 $D$ 减少 $4.24\%$），且相比同等质量的时空 A* 批规划（\code{joint\_batch}，$14.15\,\text{s}$）节省约 $27\%$ 计算时间（$10.27\,\text{s}$）；动态场景下各 SIPP+LNS 变体均将平均流程时间 $R$ 降低约 $3.3\%\sim 3.4\%$（5/0/0），其中候选预算 \code{trial\_budget} 在 $2\sim 10$ 之间质量高度平稳，取 \code{b2} 即可在 $0.28\,\text{s}$ 内获得完整收益。
+  \item 在 \textbf{V9.1 静态与超参扫描}中，\code{sipp\_stream\_bcrd} 与 \code{sipp\_stream\_matching} 将综合 $F$ 改善 $+1.53\%\sim +1.55\%$；BCRD 候选批次上限 \code{max\_batches} 从 1 增至 2 时 $F$ 由 $0.9995$ 跃升至 $0.9847$，继续增至 4 或 6 时解质量完全不变而耗时线性增长，证实 \code{max\_batches=2} 为最优拐点。
+\end{enumerate}
+
+\subsubsection{V4 BCRD 留出集泛化与事件驱动影子加速验证（1,400 次运行）}
+
+在更广泛的 90 个未见留出场景（3 类模板 $\times$ 30 种子，种子 30--59）与 20 个尺寸/负载泛化场景（30--36 单、6 车、5 层，种子 60--69）上，冻结参数后的 \code{bcrd\_budget}（\code{G2}）实测表现如表~\ref{tab:bcrd-holdout} 所示：在静态分层留出组取得 \textbf{+1.166\%} 的显著改善（19 胜 0 负 11 平，95\% 区间 $[+0.660\%, +1.718\%]$），在 90 个留出场景合计改善 $+0.406\%$，在 20 个扩大规模泛化场景上平均改善 $+0.535\%$（7 胜 0 负 13 平）。同时，对 110 对完整推演的逐项等价审计确认：引入\textbf{事件驱动影子推进}后，所有 $F/T/R/D$、轨迹与任务归属差异严格为 \textbf{0}，而留出集平均单场景耗时从 $0.897\,\text{s}$ 降至 $0.509\,\text{s}$（$\text{CPU/G0}$ 从 $3.16$ 降至 $1.77$，\textbf{总 CPU 削减 43.2\%}）。
+
+\begin{table}[htbp]
+  \centering
+  \caption{V4 BCRD 冻结留出集（90 场景）与尺寸/负载泛化集（20 场景）配对评估及事件驱动加速比}
+  \label{tab:bcrd-holdout}
+  \renewcommand{\arraystretch}{1.15}
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{l c c c c c c c}
+    \toprule
+    \bfseries 评估数据集与工况分组 & \bfseries 场景配对数 & \bfseries 平均 $\Delta F$ & \bfseries Bootstrap 95\% 区间 & \bfseries 胜/负/平 & \bfseries 逐步版 CPU (s) & \bfseries 事件版 CPU (s) & \bfseries $\text{CPU/G0}$ 变化 \\
+    \midrule
+    留出：静态分层（种子 30--59）     & 30 & +1.166\% & [+0.660\%, +1.718\%] & 19/0/11 & 1.838 & 0.838 ($2.17\times$) & $6.70 \to 3.05$ \\
+    留出：动态设备障碍（种子 30--59） & 30 & +0.052\% & [$-0.754\%$, +0.832\%] & 5/5/20  & 0.541 & 0.380 ($1.32\times$) & $1.78 \to 1.25$ \\
+    留出：动态共享 D 站（种子 30--59）& 30 & +0.000\% & [+0.000\%, +0.000\%] & 0/0/30  & 0.311 & 0.309 ($1.00\times$) & $1.01 \to 1.00$ \\
+    \textbf{留出合计（90 未见场景）}  & \textbf{90} & \textbf{+0.406\%} & \textbf{[+0.069\%, +0.737\%]} & \textbf{24/5/61} & \textbf{0.897} & \textbf{0.509 ($1.50\times$)} & $\mathbf{3.16 \to 1.77}$ \\
+    \midrule
+    泛化合计（30--36 单 6 车，20 场景）& 20 & +0.535\% & [+0.110\%, +1.067\%] & 7/0/13  & 3.595 & 2.039 ($1.52\times$) & $4.08 \to 2.28$ \\
+    \bottomrule
+  \end{tabular}%
+  }
+\end{table}
+
+\subsubsection{V9.1 混合货架 960 次未见种子留出评估与 P90 尾部保护分析}
+
+在 V9.1 混合背靠背货架的 240 个全新留出场景（4 档地图尺寸 \code{medium..xxlarge} $\times$ 3 类到达工况 $\times$ 20 新种子 \code{200..219}，共 960 次运行）上，表~\ref{tab:v91-holdout} 与图~\ref{fig:v91-holdout-fig} 对比了安全选点+ETA 匹配+有限延迟（\code{G4}）、流式 BCRD（\code{B0}）以及带预测 P90 尾部保护的流式 BCRD（\code{B1}）：
+
+\begin{table}[htbp]
+  \centering
+  \caption{V9.1 混合货架 240 个未见留出场景（960 次运行）相对默认流式基线 \code{G0} 的配对评估结果}
+  \label{tab:v91-holdout}
+  \renewcommand{\arraystretch}{1.15}
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{l c c c c c c c}
+    \toprule
+    \bfseries 候选调度策略 & \bfseries 总体平均 $\Delta F$ & \bfseries 总体 95\% 区间 & \bfseries 胜/负/平 & \bfseries 密集静态 (80) & \bfseries 稀疏均匀 (80) & \bfseries 共享 D 突发 (80) & \bfseries P90 退化例数 \\
+    \midrule
+    \code{G4}（热度选点+ETA 匹配+延迟） & +0.640\% & [+0.347\%, +0.942\%] & 154/55/31 & +0.652\% & +0.448\% & \textbf{+0.820\%} & 67 / 240 \\
+    \code{B0}（流式 BCRD，无尾部约束）  & +0.630\% & [+0.416\%, +0.879\%] & 43/1/196  & \textbf{+1.738\%} & 0.000\%  & +0.152\% & 13 / 240 \\
+    \textbf{\code{B1}（流式 BCRD + P90 保护）} & \textbf{+0.481\%} & \textbf{[+0.286\%, +0.709\%]} & \textbf{31/1/208} & \textbf{+1.292\%} & \textbf{0.000\%} & \textbf{+0.152\%} & \textbf{0 / 240} \\
+    \bottomrule
+  \end{tabular}%
+  }
+\end{table}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.84\textwidth]{figures/v91_holdout_effects.png}
+  \caption{V9.1 混合货架 240 个未见留出场景（960 次运行）各策略分工况配对收益及 95\% 置信区间}
+  \label{fig:v91-holdout-fig}
+\end{figure}
+
+结果显示：\code{G4} 在动态稀疏到达（$+0.448\%$）与共享交付站突发波次（$+0.820\%$）中优势明显，验证了基于历史取货热度的主动重定位与 16 步有限延迟对动态流的响应增益；\code{B0} 在密集静态积压工况下将综合 $F$ 大幅改善 \textbf{+1.738\%}（全留出集 43 胜 1 负 196 平）；而引入预测 P90 准入护栏的 \textbf{\code{B1}} 仅以让渡 $0.156\%$ 平均 $F$ 的微弱代价，便将 240 个留出场景中的实际 P90 尾部响应退化例数从 \textbf{13 例彻底清零至 0 例}，实现了吞吐效率与长尾服务公平性的精准兼顾。
+
+\subsubsection{V9.1 空闲待命策略专项对比实验}
+
+\begin{teammatebox}{6.4.4 节留白 —— 对应队友 \code{Betty-dey} 提交（\code{ceed0db} \code{docs/idle-policy-comparison.md}）}
+  本小节由队友补充撰写，对应 \code{results/idle-policy-20261016/} 中三类空闲待命策略（\code{stay\_safe}、\code{return\_interruptible}、\code{near\_delivery}）在稀疏均匀与共享交付站突发场景下的配对实验数据与对比分析。
+\end{teammatebox}
